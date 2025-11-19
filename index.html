@@ -18,7 +18,8 @@
             background: linear-gradient(180deg, #c2c2c2 0%, #151515 100%);
             min-height: 100vh;
             font-family: Arial, sans-serif;
-            overflow: hidden; /* Prevent scrollbars */
+            overflow-x: hidden; /* Prevent horizontal scrollbars */
+            overflow-y: auto; /* let the page scroll (required for side rails) */
         }
         
         /* Style for the game canvas */
