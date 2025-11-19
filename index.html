@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Idletris</title>
+    <style>
+        /* Reset default browser styles */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        /* Set up the page background */
+        body {
+            background: linear-gradient(180deg, #c2c2c2 0%, #151515 100%);
+            min-height: 100vh;
+            font-family: Arial, sans-serif;
+            overflow: hidden; /* Prevent scrollbars */
+        }
+        
+        /* Style for the game canvas */
+        #game-canvas {
+            /* The canvas positioning is handled in JavaScript */
+            background: rgb(0, 0, 0);
+            border-radius: 12px; /* Rounded corners */
+        }
+    </style>
+</head>
+<body>
+    <!-- The canvas element where our game will be drawn -->
+    <canvas id="game-canvas"></canvas>
+    
+    <!-- Load our TypeScript file (Vite will handle the compilation) -->
+    <script type="module" src="src/main.ts"></script>
+</body>
+</html>
