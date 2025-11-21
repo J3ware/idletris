@@ -418,9 +418,9 @@ gameContainer.id = 'game-container';
 gameContainer.style.display = 'flex';
 gameContainer.style.gap = '40px';
 gameContainer.style.alignItems = 'flex-start';
+gameContainer.style.justifyContent = 'flex-start';  // ADD THIS - align to left, not center
 
 // Let index.html handle the overall page layout.
-// We mount the game container inside #game-area (to the right of the ad).
 const gameArea = document.getElementById('game-area');
 if (gameArea) {
   gameArea.appendChild(gameContainer);
@@ -2414,7 +2414,7 @@ function clearLinesBoard2(): number {
         // Update displays
         updatePointsDisplay();
         
-        // Visual feedback - epic unlock animation!
+        /* Visual feedback - epic unlock animation!
         const gameContainer = document.getElementById('game-container');
         if (gameContainer) {
             gameContainer.style.transition = 'transform 0.5s ease';
@@ -2423,7 +2423,7 @@ function clearLinesBoard2(): number {
             setTimeout(() => {
                 gameContainer.style.transform = 'translateX(-50%) scale(1)';
             }, 500);
-        }
+        } */
         
         createSecondBoard();
     }
