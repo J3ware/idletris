@@ -41,13 +41,19 @@
 
     /* Left ad rail */
     #left-ad {
-      width: 300px;          /* matches the ad size */
-      flex-shrink: 0;
-      min-height: 600px;     /* matches the ad height */
-      display: flex;
-      justify-content: center;
-      align-items: flex-start;
-    }
+  width: 300px;          /* ad width */
+  flex-shrink: 0;
+  min-height: 600px;     /* ad height */
+
+  display: flex;
+  justify-content: center;
+  align-items: center;
+
+  /* 🔥 DEBUG STYLING — REMOVE AFTER ADS WORK */
+  background: rgba(255, 0, 0, 0.15); /* light red background */
+  border: 2px dashed red;           /* dashed red border */
+}
+
 
     /* Game area on the right */
     #game-area {
@@ -87,15 +93,20 @@
   <div id="layout">
     <!-- Left 300×600 ad rail -->
     <div id="left-ad">
-      <!-- Idletris Left Rail: fixed 300x600 -->
-      <ins class="adsbygoogle"
-           style="display:inline-block;width:300px;height:600px"
-           data-ad-client="ca-pub-4757245543517381"
-           data-ad-slot="1802489685"></ins>
-      <script>
-        (adsbygoogle = window.adsbygoogle || []).push({});
-      </script>
-    </div>
+  <div style="position:absolute; font-size:14px; color:red; top:8px; left:8px;">
+    AD SLOT (300×600)
+  </div>
+
+  <ins class="adsbygoogle"
+       style="display:inline-block;width:300px;height:600px"
+       data-ad-client="ca-pub-4757245543517381"
+       data-ad-slot="1802489685"></ins>
+
+  <script>
+    (adsbygoogle = window.adsbygoogle || []).push({});
+  </script>
+</div>
+
 
     <!-- Game area: your TS moves the canvas into its own container here -->
     <div id="game-area">
