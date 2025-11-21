@@ -22,8 +22,8 @@
     const BOARD_HEIGHT = GRID_HEIGHT * CELL_SIZE;  // Will be 600 pixels tall
 
     // Scaled-down size for board 1 when second board is unlocked (60% of original)
-const CELL_SIZE_SMALL = 18;  // 60% of 30px
-const PADDING_SMALL = 24;     // 60% of 40px padding
+const CELL_SIZE_SMALL = 15;  // 60% of 30px
+const PADDING_SMALL = 20;     // 60% of 40px padding
 
 // Calculate board dimensions for both regular and small sizes
 const BOARD_WIDTH_SMALL = GRID_WIDTH * CELL_SIZE_SMALL;    // 180px wide (10 * 18)
