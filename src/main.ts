@@ -210,14 +210,13 @@
     // Give the canvas an ID for board 1
     // canvas.id = 'game-canvas-1';
 
-    // CENTERING THE CANVAS - Make sure our game appears in the center of the screen
-    // We use CSS styles applied directly through JavaScript
-    canvas.style.position = 'fixed';  // Fixed positioning ignores scrolling
-    canvas.style.left = '50%';        // Move left edge to center of screen
-    canvas.style.top = '50%';         // Move top edge to center of screen
-    // transform: translate moves the canvas back by half its width/height
-    // This centers the middle of the canvas, not just its top-left corner
-    canvas.style.transform = 'translate(-50%, -50%)';
+// Canvas visual styling – layout is handled by index.html now
+canvas.style.position = '';
+canvas.style.left = '';
+canvas.style.top = '';
+canvas.style.transform = '';
+canvas.style.boxShadow = '0 0 4px rgba(0, 0, 0, 0.3)';
+
 
     // Optional: Add a subtle shadow for depth
     canvas.style.boxShadow = '0 0 4px rgba(0, 0, 0, 0.3)';
@@ -406,18 +405,22 @@
         // First create the global header
         createGlobalHeader();
         
-        // Create a main game container that will hold all boards
-        const gameContainer = document.createElement('div');
-        gameContainer.id = 'game-container';
-        gameContainer.style.position = 'fixed';
-        gameContainer.style.top = '140px';  // Below header
-        gameContainer.style.left = '50%';
-        gameContainer.style.transform = 'translateX(-50%)';
-        gameContainer.style.display = 'flex';
-        gameContainer.style.gap = '40px';
-        gameContainer.style.alignItems = 'flex-start';
-        
-        document.body.appendChild(gameContainer);
+const gameContainer = document.createElement('div');
+gameContainer.id = 'game-container';
+gameContainer.style.display = 'flex';
+gameContainer.style.gap = '40px';
+gameContainer.style.alignItems = 'flex-start';
+
+// Let index.html handle the overall page layout.
+// We mount the game container inside #game-area (to the right of the ad).
+const gameArea = document.getElementById('game-area');
+if (gameArea) {
+  gameArea.appendChild(gameContainer);
+} else {
+  // Fallback: append to body if #game-area is missing
+  document.body.appendChild(gameContainer);
+}
+
         
         // Create the first board's container
         const board1Container = document.createElement('div');

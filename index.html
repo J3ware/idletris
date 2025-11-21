@@ -1,40 +1,109 @@
 <!DOCTYPE html>
 <html lang="en">
-<head><script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4757245543517381"
-     crossorigin="anonymous"></script>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>IDLETRIS</title>
-    <style>
-        /* Reset default browser styles */
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        /* Set up the page background */
-        body {
-            background: linear-gradient(180deg, #c2c2c2 0%, #151515 100%);
-            min-height: 100vh;
-            font-family: Arial, sans-serif;
-            overflow-x: hidden; /* Prevent horizontal scrollbars */
-            overflow-y: auto; /* let the page scroll (required for side rails) */
-        }
-        
-        /* Style for the game canvas */
-        #game-canvas {
-            /* The canvas positioning is handled in JavaScript */
-            background: rgb(0, 0, 0);
-            border-radius: 12px; /* Rounded corners */
-        }
-    </style>
+<head>
+  <!-- Global AdSense script (only once) -->
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4757245543517381"
+          crossorigin="anonymous"></script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IDLETRIS</title>
+
+  <style>
+    /* Reset default browser styles */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    /* Page background */
+    body {
+      background: linear-gradient(180deg, #c2c2c2 0%, #151515 100%);
+      min-height: 100vh;
+      font-family: Arial, sans-serif;
+      overflow-x: hidden;
+      overflow-y: auto;
+    }
+
+    /* Main layout: left ad rail + game area */
+    #layout {
+  max-width: 1400px;
+  margin: 140px auto 32px auto;         /* 140px to clear the header */
+  padding: 16px;
+  display: flex;
+  gap: 16px;
+  align-items: center;                  /* <<< center vertically */
+  justify-content: center;              /* center horizontally */
+  min-height: calc(100vh - 140px);      /* fill screen below header */
+}
+
+
+    /* Left ad rail */
+    #left-ad {
+      width: 300px;          /* matches the ad size */
+      flex-shrink: 0;
+      min-height: 600px;     /* matches the ad height */
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+    }
+
+    /* Game area on the right */
+    #game-area {
+      flex: 1;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+    }
+
+    /* The canvas itself – size is still controlled in main.ts, this is just visuals */
+    #game-canvas {
+      background: #000000;
+      border-radius: 12px;
+      max-width: 100%;
+      box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
+    }
+
+    /* Stack on small screens */
+    @media (max-width: 900px) {
+      #layout {
+        flex-direction: column;
+        align-items: center;
+        margin-top: 140px;
+      }
+
+      #left-ad {
+        width: 100%;
+        min-height: auto;
+        margin-bottom: 12px;
+      }
+    }
+  </style>
 </head>
 <body>
-    <!-- The canvas element where our game will be drawn -->
-    <canvas id="game-canvas"></canvas>
-    
-    <!-- Load our TypeScript file (Vite will handle the compilation) -->
-    <script type="module" src="src/main.ts"></script>
+  <!-- Your script creates the fixed global header at the top -->
+
+  <div id="layout">
+    <!-- Left 300×600 ad rail -->
+    <div id="left-ad">
+      <!-- Idletris Left Rail: fixed 300x600 -->
+      <ins class="adsbygoogle"
+           style="display:inline-block;width:300px;height:600px"
+           data-ad-client="ca-pub-4757245543517381"
+           data-ad-slot="1802489685"></ins>
+      <script>
+        (adsbygoogle = window.adsbygoogle || []).push({});
+      </script>
+    </div>
+
+    <!-- Game area: your TS moves the canvas into its own container here -->
+    <div id="game-area">
+      <canvas id="game-canvas"></canvas>
+    </div>
+  </div>
+
+  <!-- Vite/TS entry (Vite will rewrite this on build) -->
+  <script type="module" src="/src/main.ts"></script>
 </body>
 </html>
