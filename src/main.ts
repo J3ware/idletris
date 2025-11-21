@@ -21,6 +21,14 @@
     const BOARD_WIDTH = GRID_WIDTH * CELL_SIZE;   // Will be 300 pixels wide
     const BOARD_HEIGHT = GRID_HEIGHT * CELL_SIZE;  // Will be 600 pixels tall
 
+    // Scaled-down size for board 1 when second board is unlocked (60% of original)
+const CELL_SIZE_SMALL = 18;  // 60% of 30px
+const PADDING_SMALL = 24;     // 60% of 40px padding
+
+// Calculate board dimensions for both regular and small sizes
+const BOARD_WIDTH_SMALL = GRID_WIDTH * CELL_SIZE_SMALL;    // 180px wide (10 * 18)
+const BOARD_HEIGHT_SMALL = GRID_HEIGHT * CELL_SIZE_SMALL;  // 360px tall (20 * 18)
+
     // CANVAS SETUP - Configure the canvas to fit our game
     // We add some padding around the board for a cleaner look
     const PADDING = 40;  // Extra space around the board (in pixels)
@@ -1245,99 +1253,101 @@ function checkCollisionBoard2(): boolean {
     // DRAWING FUNCTIONS - These functions handle all our visual rendering
 
     /**
-     * Draws the main game board
-     * This creates the black background with grey grid lines
-     */
-    function drawBoard(): void {
-        // First, clear everything on the canvas
-        // This ensures we start with a clean slate each time we draw
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
-        // Draw the black background for the game board
-        ctx.fillStyle = '#000000';  // Set color to pure black (hex color code)
-        // fillRect draws a filled rectangle: (x position, y position, width, height)
-        ctx.fillRect(PADDING, PADDING, BOARD_WIDTH, BOARD_HEIGHT);
-        
-        // Now draw the grid lines
-        ctx.strokeStyle = '#3b3b3bff';  // Dark grey color for the grid lines
-        ctx.lineWidth = 1;  // How thick the lines should be (1 pixel)
-        
-        // Draw vertical lines (columns)
-        // We loop through each column position
-        for (let col = 0; col <= GRID_WIDTH; col++) {
-            // Calculate the x position for this vertical line
-            const x = PADDING + (col * CELL_SIZE);
-            
-            // Begin drawing a new path (think of lifting your pen)
-            ctx.beginPath();
-            // Move to the starting point (top of the line)
-            ctx.moveTo(x, PADDING);
-            // Draw a line to the end point (bottom of the line)
-            ctx.lineTo(x, PADDING + BOARD_HEIGHT);
-            // Actually draw the line with the current stroke style
-            ctx.stroke();
-        }
-        
-        // Draw horizontal lines (rows)
-        // Same concept but for horizontal lines
-        for (let row = 0; row <= GRID_HEIGHT; row++) {
-            // Calculate the y position for this horizontal line
-            const y = PADDING + (row * CELL_SIZE);
-            
-            ctx.beginPath();
-            // Start from the left edge
-            ctx.moveTo(PADDING, y);
-            // Draw to the right edge
-            ctx.lineTo(PADDING + BOARD_WIDTH, y);
-            ctx.stroke();
-        }
-        
-        // Optional: Draw a border around the entire board for a polished look
-        ctx.strokeStyle = '#666666';  // Slightly brighter grey for the border
-        ctx.lineWidth = 2;  // Make the border thicker
-        ctx.strokeRect(PADDING, PADDING, BOARD_WIDTH, BOARD_HEIGHT);
+ * Draws the main game board
+ * This creates the black background with grey grid lines
+ */
+function drawBoard(): void {
+    // Determine if we should use small size for board 1
+    const useSmallSize = secondBoardUnlocked;
+    const cellSize = useSmallSize ? CELL_SIZE_SMALL : CELL_SIZE;
+    const padding = useSmallSize ? PADDING_SMALL : PADDING;
+    const boardWidth = useSmallSize ? BOARD_WIDTH_SMALL : BOARD_WIDTH;
+    const boardHeight = useSmallSize ? BOARD_HEIGHT_SMALL : BOARD_HEIGHT;
+    
+    // Resize canvas if needed (only happens once when board 2 is unlocked)
+    if (useSmallSize && canvas.width !== boardWidth + (padding * 2)) {
+        canvas.width = boardWidth + (padding * 2);
+        canvas.height = boardHeight + (padding * 2);
     }
+    
+    // First, clear everything on the canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Draw the black background for the game board
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(padding, padding, boardWidth, boardHeight);
+    
+    // Now draw the grid lines
+    ctx.strokeStyle = '#3b3b3bff';
+    ctx.lineWidth = 1;
+    
+    // Draw vertical lines (columns)
+    for (let col = 0; col <= GRID_WIDTH; col++) {
+        const x = padding + (col * cellSize);
+        ctx.beginPath();
+        ctx.moveTo(x, padding);
+        ctx.lineTo(x, padding + boardHeight);
+        ctx.stroke();
+    }
+    
+    // Draw horizontal lines (rows)
+    for (let row = 0; row <= GRID_HEIGHT; row++) {
+        const y = padding + (row * cellSize);
+        ctx.beginPath();
+        ctx.moveTo(padding, y);
+        ctx.lineTo(padding + boardWidth, y);
+        ctx.stroke();
+    }
+    
+    // Draw a border around the entire board
+    ctx.strokeStyle = '#666666';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(padding, padding, boardWidth, boardHeight);
+}
 
     // PIECE DRAWING FUNCTIONS - These make our pieces visible on screen
 
     /**
-     * Draws a single block
-     * This is the building block (pun intended!) for drawing pieces
-     * @param x - The x position in grid units (0-9 for our board)
-     * @param y - The y position in grid units (0-19 for our board)
-     * @param color - The color to fill this block with
-     */
-    function drawBlock(x: number, y: number, color: string): void {
-        // Convert grid coordinates to pixel coordinates
-        // We multiply by CELL_SIZE and add PADDING to account for the board offset
-        const pixelX = PADDING + (x * CELL_SIZE);
-        const pixelY = PADDING + (y * CELL_SIZE);
-        
-        // Set the fill color for this block
-        ctx.fillStyle = color;
-        
-        // Draw the main block square
-        ctx.fillRect(pixelX, pixelY, CELL_SIZE, CELL_SIZE);
-        
-        // Add a subtle 3D effect with borders
-        
-        // Lighter border on top and left (gives "raised" appearance)
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';  // Semi-transparent white
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(pixelX, pixelY + CELL_SIZE);        // Bottom-left corner
-        ctx.lineTo(pixelX, pixelY);                    // Top-left corner
-        ctx.lineTo(pixelX + CELL_SIZE, pixelY);        // Top-right corner
-        ctx.stroke();
-        
-        // Darker border on bottom and right (gives "shadow" appearance)
-        ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';        // Semi-transparent black
-        ctx.beginPath();
-        ctx.moveTo(pixelX + CELL_SIZE, pixelY);        // Top-right corner
-        ctx.lineTo(pixelX + CELL_SIZE, pixelY + CELL_SIZE);  // Bottom-right corner
-        ctx.lineTo(pixelX, pixelY + CELL_SIZE);        // Bottom-left corner
-        ctx.stroke();
-    }
+ * Draws a single block
+ * This is the building block (pun intended!) for drawing pieces
+ * @param x - The x position in grid units (0-9 for our board)
+ * @param y - The y position in grid units (0-19 for our board)
+ * @param color - The color to fill this block with
+ */
+function drawBlock(x: number, y: number, color: string): void {
+    // Use smaller cell size if board 2 is unlocked
+    const useSmallSize = secondBoardUnlocked;
+    const cellSize = useSmallSize ? CELL_SIZE_SMALL : CELL_SIZE;
+    const padding = useSmallSize ? PADDING_SMALL : PADDING;
+    
+    // Convert grid coordinates to pixel coordinates
+    const pixelX = padding + (x * cellSize);
+    const pixelY = padding + (y * cellSize);
+    
+    // Set the fill color for this block
+    ctx.fillStyle = color;
+    
+    // Draw the main block square
+    ctx.fillRect(pixelX, pixelY, cellSize, cellSize);
+    
+    // Add a subtle 3D effect with borders
+    // Lighter border on top and left (gives "raised" appearance)
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.lineWidth = useSmallSize ? 1 : 2;  // Thinner lines for smaller blocks
+    ctx.beginPath();
+    ctx.moveTo(pixelX, pixelY + cellSize);
+    ctx.lineTo(pixelX, pixelY);
+    ctx.lineTo(pixelX + cellSize, pixelY);
+    ctx.stroke();
+    
+    // Darker border on bottom and right (gives "shadow" appearance)
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.beginPath();
+    ctx.moveTo(pixelX + cellSize, pixelY);
+    ctx.lineTo(pixelX + cellSize, pixelY + cellSize);
+    ctx.lineTo(pixelX, pixelY + cellSize);
+    ctx.stroke();
+}
 
     /**
      * Draws the currently falling piece
