@@ -145,9 +145,6 @@ const BOARD_HEIGHT_SMALL = GRID_HEIGHT * CELL_SIZE_SMALL;  // 360px tall (20 * 1
     const UNLOCK_SECOND_BOARD_COST = 25;  // Cost to unlock the second board
     let secondBoardUnlocked = false;  // Track if second board is unlocked
 
-    // Cost to reset board 1 after it loses (only applies when board 2 is unlocked)
-    const RESET_BOARD_1_COST = 50;
-
     // Track which board is currently being controlled by the player
     let activePlayerBoard = 1;  // 1 or 2, shows which board the player controls
 
@@ -248,8 +245,7 @@ canvas.style.boxShadow = '0 0 4px rgba(0, 0, 0, 0.3)';
 // Dialogue system state variables
 let dialogueQueue: string[] = [];  // Queue of dialogue IDs to show
 let currentDialogue: string | null = null;  // Currently showing dialogue
-let shownDialogues: Set<string> = new Set();  // Features unlocked (for help button review)
-let displayedDialogues: Set<string> = new Set();  // Dialogues actually shown on screen
+let shownDialogues: Set<string> = new Set();  // Dialogues shown this game session
 let tutorialsEnabled = true;  // Can be toggled via checkbox in header
 
 // Dialogue content definitions - each upgrade gets an explanation
@@ -277,7 +273,7 @@ const DIALOGUE_CONTENT: { [key: string]: { title: string; description: string } 
     'force-next-piece': {
         title: 'Unlock Force Next Piece',
         description: 'Spend 25 points to unlock Force Next Piece. Once unlocked, you can spend 5 points anytime to change the upcoming piece to whichever shape you want. Click any piece icon below the preview to force that piece next!'
-    },
+    }
 };
 
 /**
@@ -384,17 +380,14 @@ function createDialogueSystem(): void {
  * @param targetElement - The HTML element to point the dialogue at
  */
 function showDialogue(dialogueId: string, targetElement: HTMLElement | null): void {
-    // Always track that this feature was unlocked (for the help button review)
-    shownDialogues.add(dialogueId);
-    
-    // Don't display if tutorials are disabled
+    // Don't show if tutorials are disabled
     if (!tutorialsEnabled) return;
     
-    // Don't display if already shown on screen this session
-    if (displayedDialogues.has(dialogueId)) return;
+    // Don't show if already shown this game
+    if (shownDialogues.has(dialogueId)) return;
     
-    // Mark as displayed
-    displayedDialogues.add(dialogueId);
+    // Add to shown set
+    shownDialogues.add(dialogueId);
     
     // Get the dialogue content
     const content = DIALOGUE_CONTENT[dialogueId];
@@ -409,21 +402,20 @@ function showDialogue(dialogueId: string, targetElement: HTMLElement | null): vo
         return;
     }
     
-    // Get elements FIRST before pausing
-    const overlay = document.getElementById('dialogue-overlay');
-    const box = document.getElementById('dialogue-box');
-    const title = document.getElementById('dialogue-title');
-    const description = document.getElementById('dialogue-description');
-    
-    // Only pause if we can actually show the dialogue
-    if (!overlay || !box || !title || !description) return;
-    
-    // Pause the game (moved AFTER element check)
+    // Pause the game
     isPaused = true;
     currentDialogue = dialogueId;
 
     // pause page scrolling
     document.body.classList.add("noscroll");
+    
+    // Get elements
+    const overlay = document.getElementById('dialogue-overlay');
+    const box = document.getElementById('dialogue-box');
+    const title = document.getElementById('dialogue-title');
+    const description = document.getElementById('dialogue-description');
+    
+    if (!overlay || !box || !title || !description) return;
     
     // Set the content
     title.textContent = content.title;
@@ -1021,107 +1013,6 @@ if (gameArea) {
             setTimeout(() => createBoardUpgradeButtons(1), 100);
         }
     }
-
-    /**
-     * Creates a minimal UI for board 2 (no next piece preview, no upgrades)
-     * Board 2 is meant to be player-controlled with no upgrade progression
-     */
-    function createMinimalBoardUI(boardNumber: number): void {
-        const boardContainer = document.getElementById(`board-${boardNumber}-container`);
-        if (!boardContainer) return;
-        
-        // Create the UI panel for this board (smaller, simpler)
-        const uiPanel = document.createElement('div');
-        uiPanel.id = `board-${boardNumber}-ui`;
-        uiPanel.style.width = '150px';  // Narrower than board 1's UI
-        uiPanel.style.padding = '15px';
-        uiPanel.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-        uiPanel.style.borderRadius = '12px';
-        uiPanel.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.3)';
-        uiPanel.style.color = 'white';
-        uiPanel.style.fontFamily = 'Arial, sans-serif';
-        
-        // Board label
-        const boardLabel = document.createElement('h3');
-        boardLabel.textContent = `Board ${boardNumber}`;
-        boardLabel.style.margin = '0 0 15px 0';
-        boardLabel.style.textAlign = 'center';
-        boardLabel.style.color = '#2196F3';  // Blue for board 2
-        boardLabel.style.fontSize = '16px';
-        
-        // Lines cleared counter (this is useful to keep)
-        const statsSection = document.createElement('div');
-        statsSection.style.marginBottom = '15px';
-        statsSection.style.padding = '12px';
-        statsSection.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
-        statsSection.style.borderRadius = '8px';
-        statsSection.innerHTML = `
-            <div style="font-size: 12px; opacity: 0.7;">Lines Cleared</div>
-            <div style="font-size: 20px; font-weight: bold;">
-                <span id="board-${boardNumber}-lines">0</span>
-            </div>
-        `;
-        
-        // Board status (always Player Control for board 2)
-        const statusSection = document.createElement('div');
-        statusSection.id = `board-${boardNumber}-status`;
-        statusSection.style.padding = '8px';
-        statusSection.style.backgroundColor = 'rgba(76, 175, 80, 0.2)';
-        statusSection.style.borderRadius = '8px';
-        statusSection.style.textAlign = 'center';
-        statusSection.style.fontSize = '12px';
-        statusSection.innerHTML = '<span>🎮 Player Control</span>';
-        
-        // Helpful tip for the player
-        const tipSection = document.createElement('div');
-        tipSection.style.marginTop = '15px';
-        tipSection.style.padding = '10px';
-        tipSection.style.backgroundColor = 'rgba(33, 150, 243, 0.1)';
-        tipSection.style.borderRadius = '8px';
-        tipSection.style.fontSize = '11px';
-        tipSection.style.color = '#aaa';
-        tipSection.style.textAlign = 'center';
-        tipSection.style.lineHeight = '1.4';
-        tipSection.innerHTML = 'Use arrow keys<br>to play!';
-        
-        // Assemble the UI panel (NO next piece preview, NO upgrades section)
-        uiPanel.appendChild(boardLabel);
-        uiPanel.appendChild(statsSection);
-        uiPanel.appendChild(statusSection);
-        uiPanel.appendChild(tipSection);
-        
-        // Add to board container
-        boardContainer.appendChild(uiPanel);
-    }
-
-    /**
-     * Simplifies Board 1's UI when the second board is unlocked
-     * Hides the next piece preview and upgrade buttons since board 1 is now fully AI-controlled
-     */
-    function simplifyBoard1UI(): void {
-        // Hide the next piece preview section for board 1
-        // The AI doesn't need a preview since it calculates moves automatically
-        const nextPieceCanvas = document.getElementById('next-piece-canvas-1');
-        if (nextPieceCanvas && nextPieceCanvas.parentElement) {
-            // Hide the entire "Next Piece" section (the parent container)
-            nextPieceCanvas.parentElement.style.display = 'none';
-        }
-        
-        // Hide the upgrades section for board 1 (all buttons: AI Active, AI Hard Drop, AI Speed)
-        const upgradesSection = document.getElementById('board-1-upgrades');
-        if (upgradesSection) {
-            upgradesSection.style.display = 'none';
-        }
-        
-        // Optionally, we could also hide the force next piece container if it exists
-        const forceNextPieceContainer = document.getElementById('force-next-piece-container-1');
-        if (forceNextPieceContainer) {
-            forceNextPieceContainer.style.display = 'none';
-        }
-        
-        console.log("Board 1 UI simplified - hiding next piece preview and upgrade buttons");
-    }
-
     /**
      * Creates the upgrade buttons specific to a board
      * Each board has its own AI and upgrade progression
@@ -1398,7 +1289,7 @@ if (gameArea) {
         
         // Show tutorial dialogue
         const container = document.getElementById('force-next-piece-container-1');
-        if (container && !shownDialogues.has('force-next-piece')) {
+        if (container && tutorialsEnabled && !shownDialogues.has('force-next-piece')) {
             showDialogue('force-next-piece', container);
         }
     }
@@ -1443,10 +1334,6 @@ if (gameArea) {
         // Update displays
         updatePointsDisplay();
         updateNextPiecePreview(1);
-
-        // Reset AI state so it can calculate a move for the new piece
-        aiTargetPosition = null;
-        aiMoving = false;
         
         // Show success message
         console.log(`Next piece changed to '${pieceType}'!`);
@@ -1806,173 +1693,6 @@ if (gameArea) {
             overlay.style.display = 'none';
         }, 500);  // Match the transition duration
     }
-
-    /**
-     * Shows an overlay when Board 1 loses (but board 2 is still active)
-     * Player can pay 50 points to reset board 1 with full AI upgrades
-     */
-    function showBoard1LostOverlay(): void {
-        // Create the overlay that dims board 1
-        const overlay = document.createElement('div');
-        overlay.id = 'board-1-lost-overlay';
-        
-        // Style the overlay - covers just board 1 area
-        overlay.style.position = 'absolute';
-        overlay.style.top = '0';
-        overlay.style.left = '0';
-        overlay.style.width = '100%';
-        overlay.style.height = '100%';
-        overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
-        overlay.style.display = 'flex';
-        overlay.style.flexDirection = 'column';
-        overlay.style.justifyContent = 'center';
-        overlay.style.alignItems = 'center';
-        overlay.style.zIndex = '100';
-        overlay.style.borderRadius = '12px';
-        
-        // Create the "Board 1 Lost" title
-        const title = document.createElement('h2');
-        title.textContent = 'BOARD 1 LOST';
-        title.style.color = '#ff4444';
-        title.style.fontSize = '20px';
-        title.style.margin = '0 0 15px 0';
-        title.style.fontFamily = 'Arial, sans-serif';
-        title.style.textShadow = '1px 1px 4px rgba(255,68,68,0.5)';
-        
-        // Create info text
-        const infoText = document.createElement('p');
-        infoText.style.color = '#aaa';
-        infoText.style.fontSize = '12px';
-        infoText.style.margin = '0 0 15px 0';
-        infoText.style.textAlign = 'center';
-        infoText.style.padding = '0 10px';
-        infoText.innerHTML = 'Pay to restart with<br>max AI speed + hard drop';
-        
-        // Create the Reset button
-        const resetButton = document.createElement('button');
-        resetButton.id = 'reset-board-1-button';
-        resetButton.textContent = `Reset (${RESET_BOARD_1_COST} pts)`;
-        resetButton.style.padding = '10px 20px';
-        resetButton.style.fontSize = '14px';
-        resetButton.style.fontWeight = 'bold';
-        resetButton.style.backgroundColor = points >= RESET_BOARD_1_COST ? '#4CAF50' : '#888888';
-        resetButton.style.color = 'white';
-        resetButton.style.border = 'none';
-        resetButton.style.borderRadius = '8px';
-        resetButton.style.cursor = points >= RESET_BOARD_1_COST ? 'pointer' : 'not-allowed';
-        resetButton.style.transition = 'all 0.3s ease';
-        resetButton.disabled = points < RESET_BOARD_1_COST;
-        
-        // Add hover effect for the reset button
-        resetButton.addEventListener('mouseenter', () => {
-            if (!resetButton.disabled) {
-                resetButton.style.backgroundColor = '#45a049';
-                resetButton.style.transform = 'scale(1.05)';
-            }
-        });
-        
-        resetButton.addEventListener('mouseleave', () => {
-            resetButton.style.backgroundColor = resetButton.disabled ? '#888888' : '#4CAF50';
-            resetButton.style.transform = 'scale(1)';
-        });
-        
-        // Add click handler to reset board 1
-        resetButton.addEventListener('click', () => {
-            if (points >= RESET_BOARD_1_COST) {
-                resetBoard1WithUpgrades();
-            }
-        });
-        
-        // Assemble the overlay
-        overlay.appendChild(title);
-        overlay.appendChild(infoText);
-        overlay.appendChild(resetButton);
-        
-        // Add overlay to board 1 container
-        const board1Container = document.getElementById('board-1-container');
-        if (board1Container) {
-            // Make board 1 container relative so overlay positions correctly
-            board1Container.style.position = 'relative';
-            board1Container.appendChild(overlay);
-        }
-        
-        console.log("Board 1 lost overlay shown. Cost to reset:", RESET_BOARD_1_COST);
-    }
-    
-    /**
-     * Updates the Board 1 Lost overlay button state
-     * Called when points change to enable/disable the reset button
-     */
-    function updateBoard1LostOverlay(): void {
-        const resetButton = document.getElementById('reset-board-1-button') as HTMLButtonElement;
-        if (!resetButton) return;
-        
-        // Update button state based on current points
-        const canAfford = points >= RESET_BOARD_1_COST;
-        resetButton.disabled = !canAfford;
-        resetButton.style.backgroundColor = canAfford ? '#4CAF50' : '#888888';
-        resetButton.style.cursor = canAfford ? 'pointer' : 'not-allowed';
-    }
-    
-    /**
-     * Resets Board 1 with full AI upgrades (max speed + hard drop)
-     * Called when player pays 50 points after board 1 loses
-     */
-    function resetBoard1WithUpgrades(): void {
-        // Deduct the cost
-        points -= RESET_BOARD_1_COST;
-        
-        // Remove the "Board 1 Lost" overlay
-        const overlay = document.getElementById('board-1-lost-overlay');
-        if (overlay) {
-            overlay.remove();
-        }
-        
-        // Reset board 1 game state
-        isGameOver = false;
-        currentPiece = null;
-        nextPiece = null;
-        totalLinesCleared = 0;
-        
-        // Reset board 1 to a clean state
-        initializeBoard();
-        
-        // Set up board 1 with FULL AI upgrades (this is the reward for paying)
-        aiPlayerHired = true;
-        aiEnabled = true;
-        aiHardDropUnlocked = true;
-        aiSpeedLevel = MAX_AI_SPEED_UPGRADES;  // Max speed level
-        aiSpeed = BASE_AI_SPEED / Math.pow(1.5, MAX_AI_SPEED_UPGRADES);  // Calculate max speed
-        
-        // Reset AI movement state
-        aiTargetPosition = null;
-        aiMoving = false;
-        aiLastMoveTime = 0;
-        
-        // Reset timing
-        lastDropTime = performance.now();
-        
-        // Spawn first piece
-        spawnNewPiece();
-        
-        // Update all displays
-        updatePointsDisplay();
-        updateBoardStatus(1);
-        
-        // Visual feedback - green flash
-        const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
-        if (canvas) {
-            canvas.style.transition = 'box-shadow 0.5s ease';
-            canvas.style.boxShadow = '0 0 40px rgba(76,175,80,0.8)';
-            
-            setTimeout(() => {
-                canvas.style.boxShadow = '0 0 20px rgba(0,0,0,0.3)';
-            }, 500);
-        }
-        
-        console.log("Board 1 reset with full AI upgrades!");
-    }
-
     /**
      * Resets the entire game to starting state
      * Called when player clicks "Play Again" button
@@ -2132,30 +1852,23 @@ function initializeBoardState(boardNumber: number): void {
             color: PIECE_COLORS[pieceType]
         };
         
-        // Check if the new piece immediately collides (game over for this board)
+        // Check if the new piece immediately collides (game over)
         if (checkCollision()) {
-            // Board 1 lost - set game over state for board 1
+            // GAME OVER! - Set the game over state
             isGameOver = true;
             currentPiece = null;
             
-            // Disable AI if it was running on board 1
+            // Disable AI if it was running
             if (aiEnabled) {
                 aiEnabled = false;
                 aiTargetPosition = null;
                 aiMoving = false;
             }
             
-            // If board 2 is unlocked, board 1 losing is NOT a full game over
-            // Player can pay to reset board 1
-            if (secondBoardUnlocked) {
-                console.log("Board 1 lost! Player can pay to reset it.");
-                // Show the "Board 1 Lost" overlay instead of full game over
-                showBoard1LostOverlay();
-            } else {
-                // Board 2 not unlocked yet - this is a full game over
-                showGameOverScreen();
-                console.log("GAME OVER! Pieces reached the top.");
-            }
+            // Show the game over screen instead of alert
+            showGameOverScreen();
+            
+            console.log("GAME OVER! Pieces reached the top.");
             return;
         }
         
@@ -2165,10 +1878,6 @@ function initializeBoardState(boardNumber: number): void {
         
         // Update the preview display
         updateNextPiecePreview(1);
-        
-        // Reset AI state so it can calculate a move for the new piece
-        aiTargetPosition = null;
-        aiMoving = false;
         
         // For debugging
         console.log(`Spawned piece: ${pieceType}, Next piece: ${nextPiece}`);
@@ -2205,13 +1914,16 @@ function spawnNewPieceBoard2(): void {
         // Disable AI if it was running on board 2
         if (aiEnabledBoard2) {
             aiEnabledBoard2 = false;
+            //aiTargetPositionBoard2 = null;
+            //aiMovingBoard2 = false;
         }
         
         console.log("GAME OVER on Board 2!");
         
-        // Board 2 is the active player board, so losing it means full game over
-        // This is the ONLY way to trigger game over once board 2 exists
-        showGameOverScreen();
+        // Check if both boards are game over
+        if (isGameOver && isGameOverBoard2) {
+            showGameOverScreen();
+        }
         return;
     }
     
@@ -3052,9 +2764,6 @@ function clearLinesBoard2(): number {
         updateGlobalHardDropButton();
         updateUnlockSecondBoardButton();
         updateBoard1Buttons();
-        
-        // Update the Board 1 Lost overlay if it exists (so button enables when affordable)
-        updateBoard1LostOverlay();
     }
 
     /**
@@ -3080,7 +2789,7 @@ function clearLinesBoard2(): number {
         hardDropButton.disabled = false;
         
         // Show dialogue if this is the first time the button is becoming visible
-        if (wasHidden && !shownDialogues.has('global-harddrop')) {
+        if (wasHidden && tutorialsEnabled && !shownDialogues.has('global-harddrop')) {
             showDialogue('global-harddrop', hardDropButton);
         }
     } else {
@@ -3155,7 +2864,7 @@ function clearLinesBoard2(): number {
             aiButton.textContent = `Hire AI (${AI_PLAYER_COST} pts)`;
             
             // Show dialogue if this is the first time the button is becoming visible
-            if (wasHidden && !shownDialogues.has('hire-ai-1')) {
+            if (wasHidden && tutorialsEnabled && !shownDialogues.has('hire-ai-1')) {
                 showDialogue('hire-ai-1', aiButton);
             }
         } else {
@@ -3188,7 +2897,7 @@ function clearLinesBoard2(): number {
             aiHardDropButton.disabled = false;
             
             // Show dialogue if this is the first time the button is becoming visible
-            if (wasHidden && !shownDialogues.has('ai-harddrop-1')) {
+            if (wasHidden && tutorialsEnabled && !shownDialogues.has('ai-harddrop-1')) {
                 showDialogue('ai-harddrop-1', aiHardDropButton);
             }
         } else {
@@ -3222,7 +2931,7 @@ function clearLinesBoard2(): number {
             aiSpeedButton.textContent = `AI Speed Lv${aiSpeedLevel + 1} (${AI_SPEED_UPGRADE_COST} pts)`;
             
             // Show dialogue if this is the first time the button is becoming visible
-            if (wasHidden && !shownDialogues.has('ai-speed-1')) {
+            if (wasHidden && tutorialsEnabled && !shownDialogues.has('ai-speed-1')) {
                 showDialogue('ai-speed-1', aiSpeedButton);
             }
         } else {
@@ -3481,9 +3190,11 @@ function createSecondBoard(): void {
     // Add to game container
     gameContainer.appendChild(board2Container);
     
-    // Create a minimal UI for board 2 (no next piece preview, no upgrades)
-    // Board 2 is player-controlled and has no upgrade path
-    createMinimalBoardUI(2);
+    // Create the UI for board 2
+    createBoardUI(2);
+    
+    // Create upgrade buttons for board 2
+    createBoardUpgradeButtons(2);
     
     // Initialize board 2's game state
     initializeBoardState(2);
@@ -3502,10 +3213,6 @@ function createSecondBoard(): void {
         aiEnabled = true;
         updateBoardStatus(1);
     }
-    
-    // Simplify board 1's UI since it's now fully AI-controlled
-    // Hide the next piece preview and upgrade buttons
-    simplifyBoard1UI();
     
     console.log("Board 2 created! Player now controls board 2, AI controls board 1.");
     }

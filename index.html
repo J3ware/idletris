@@ -7,6 +7,7 @@
 
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Idletris is a browser-based incremental falling-block puzzle game. Pieces drop over time while you earn points by clearing lines which unlock AI idle player upgrades." />
   <title>IDLETRIS</title>
 
   <style>
@@ -17,14 +18,21 @@
       box-sizing: border-box;
     }
 
-    /* Page background */
-    body {
-      background: linear-gradient(180deg, #c2c2c2 0%, #151515 100%);
-      min-height: 100vh;
-      font-family: Arial, sans-serif;
-      overflow-x: hidden;
-      overflow-y: auto;
-    }
+/* Page background */
+body {
+  background: linear-gradient(180deg, #c2c2c2 0%, #151515 100%);
+  min-height: 100vh;
+  font-family: Arial, sans-serif;
+  color: white;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* When game wants to lock scrolling */
+body.noscroll {
+  overflow: hidden;
+}
+
 
     /* Main layout: left ad rail + game area */
     #layout {
@@ -54,14 +62,14 @@
   border: 2px dashed red;           /* dashed red border */
 }
 
-
     /* Game area on the right */
     #game-area {
-      flex: 1;
-      display: flex;
-      justify-content: center;
-      align-items: flex-start;
-    }
+  flex: 1;
+  display: flex;
+  justify-content: flex-start;  /* Change from center to flex-start */
+  align-items: flex-start;
+  padding-left: 20px;  /* Add some space from the ad */
+}
 
     /* The canvas itself – size is still controlled in main.ts, this is just visuals */
     #game-canvas {
@@ -85,6 +93,37 @@
         margin-bottom: 12px;
       }
     }
+    #site-info {
+  max-width: 1400px;
+  margin: 40px auto 24px auto;
+  padding: 0 16px;
+  font-size: 13px;
+  text-align: center;
+  opacity: 0.55;
+  color: #f5f5f5;
+}
+
+#site-info .footer-inner {
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+#site-info .footer-title {
+  font-weight: 600;
+  font-size: 15px;
+  margin-bottom: 4px;
+  opacity: 0.9;
+}
+
+#site-info .footer-description {
+  margin: 6px 0 10px 0;
+  line-height: 1.45;
+}
+
+#site-info .footer-meta {
+  font-size: 12px;
+  opacity: 0.7;
+}
   </style>
 </head>
 <body>
@@ -113,7 +152,25 @@
     </div>
   </div>
 
-  <!-- Vite/TS entry (Vite will rewrite this on build) -->
+<footer id="site-info">
+  <div class="footer-inner">
+
+    <p class="footer-description">
+      Idletris is a browser-based incremental falling-block puzzle game developed and published by J3 Software LLC. Players guide falling pieces, clear lines to earn points, unlock upgrades, and evolve their gameplay strategy over time. Idletris offers a lightweight, no-account, ad-supported experience designed for quick play sessions on desktop browsers.
+    </p>
+
+    <p class="footer-meta">
+      © <span id="footer-year"></span> J3 Software LLC · All rights reserved.
+    </p>
+  </div>
+</footer>
+
+<script>
+  // Auto-fill year
+  document.getElementById('footer-year').textContent = new Date().getFullYear();
+</script>
+
+  <!-- Your Vite entry; Vite will rewrite this path on build -->
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>
