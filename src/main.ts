@@ -4522,7 +4522,7 @@ function createSecondBoard(): void {
 
     /**
      * Shows an overlay when Board 2 loses (but board 3 is still active)
-     */
+     
     function showBoard2LostOverlay(): void {
         const overlay = document.createElement('div');
         overlay.id = 'board-2-lost-overlay';
@@ -4582,7 +4582,7 @@ function createSecondBoard(): void {
             board2Container.style.position = 'relative';
             board2Container.appendChild(overlay);
         }
-    }
+    }*/
 
     /**
      * Updates the Board 2 Lost overlay button state
@@ -4599,7 +4599,7 @@ function createSecondBoard(): void {
 
     /**
      * Resets Board 2 with full AI upgrades
-     */
+     
     function resetBoard2WithUpgrades(): void {
         points -= RESET_BOARD_2_COST;
         
@@ -4633,7 +4633,7 @@ function createSecondBoard(): void {
         updateBoardStatus(2);
         
         console.log("Board 2 reset with full AI upgrades!");
-    }
+    }*/
 
     // AI PLAYER FUNCTIONS
 
