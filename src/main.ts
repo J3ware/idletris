@@ -1,322 +1,1946 @@
-// main.ts - The entry point for our Idletris game
+// main.ts - Idletris Multi-Board Refactor
+// Supports up to 7 boards with array-based architecture
+// All boards contribute to global points/score
 
-    // First, we need to tell TypeScript that we're working with the browser's Canvas API
-    // The "!" after getElementById tells TypeScript "trust me, this element exists"
-    const canvas = document.getElementById('game-canvas')! as HTMLCanvasElement;
+// =====================================================
+// CANVAS SETUP
+// =====================================================
+const canvas = document.getElementById('game-canvas')! as HTMLCanvasElement;
+const ctx = canvas.getContext('2d')!;
 
-    // The "context" is like our paintbrush - it's what we use to draw on the canvas
-    // We're using '2d' because Idletris is a 2D game (not 3D)
-    const ctx = canvas.getContext('2d')!;
+// =====================================================
+// GAME CONSTANTS
+// =====================================================
+const GRID_WIDTH = 10;      // Number of columns
+const GRID_HEIGHT = 20;     // Number of rows
+const CELL_SIZE = 30;       // Pixels per cell (active board)
+const CELL_SIZE_MINI = 10;  // Pixels per cell (minified boards - 1/3 size)
+const PADDING = 40;         // Padding around active board
+const PADDING_MINI = 5;     // Padding around mini boards
 
-    // GAME CONSTANTS - These define the size and structure of our Idletris board
-    const GRID_WIDTH = 10;   // Number of columns (how wide)
-    const GRID_HEIGHT = 20;  // Number of rows (how tall)
+// Board dimensions
+const BOARD_WIDTH = GRID_WIDTH * CELL_SIZE;           // 300px
+const BOARD_HEIGHT = GRID_HEIGHT * CELL_SIZE;         // 600px
+const BOARD_WIDTH_MINI = GRID_WIDTH * CELL_SIZE_MINI; // 100px
+const BOARD_HEIGHT_MINI = GRID_HEIGHT * CELL_SIZE_MINI; // 200px
 
-    // Each cell (block) in our grid will be a square of this size (in pixels)
-    // You can make this bigger or smaller to change the overall game size
-    const CELL_SIZE = 30;
+// Timing constants
+const DROP_SPEED = 1000;          // Milliseconds between automatic drops
+const BASE_AI_SPEED = 300;        // Starting AI speed in milliseconds
+const MAX_AI_SPEED_UPGRADES = 5;  // Maximum speed upgrade levels
 
-    // Calculate the total size of our game board in pixels
-    // We multiply the number of cells by the size of each cell
-    const BOARD_WIDTH = GRID_WIDTH * CELL_SIZE;   // Will be 300 pixels wide
-    const BOARD_HEIGHT = GRID_HEIGHT * CELL_SIZE;  // Will be 600 pixels tall
+// Maximum number of boards (6 mini + 1 active = 7 total)
+const MAX_BOARDS = 7;
 
-    // Scaled-down size for board 1 when second board is unlocked (60% of original)
-const CELL_SIZE_SMALL = 10;  // 30% of 30px
-const PADDING_SMALL = 20;     // 50% of 40px padding
+// =====================================================
+// COST CONFIGURATION
+// =====================================================
+// Base costs for Board 1 (index 0)
+const BASE_COSTS = {
+    HARD_DROP: 1,                  // Global hard drop unlock
+    HIRE_AI: 5,                    // Hire AI for a board
+    AI_HARD_DROP: 5,               // AI hard drop upgrade
+    AI_SPEED: 10,                  // Per speed level (5 levels total)
+    UNLOCK_NEXT_BOARD: 25,         // Cost to unlock board 2
+    RESET_BOARD: 10,               // Cost to reset board 1 after loss
+    FORCE_NEXT_PIECE_UNLOCK: 20,   // Unlock force next piece feature
+    FORCE_NEXT_PIECE_USE: 5,       // Cost per use
+};
 
-// Calculate board dimensions for both regular and small sizes
-const BOARD_WIDTH_SMALL = GRID_WIDTH * CELL_SIZE_SMALL;    // 180px wide (10 * 18)
-const BOARD_HEIGHT_SMALL = GRID_HEIGHT * CELL_SIZE_SMALL;  // 360px tall (20 * 18)
+// Cost multiplier per board tier (1.5x each board)
+const COST_MULTIPLIER = 1.5;
 
-    // CANVAS SETUP - Configure the canvas to fit our game
-    // We add some padding around the board for a cleaner look
-    const PADDING = 40;  // Extra space around the board (in pixels)
-    // IDLETRIS PIECES
-    // Each piece is represented as a 2D array where:
-    // - 0 means empty space
-    // - 1 means there's a block there
-    // These are the "blueprints" for each piece shape
+// =====================================================
+// COST CALCULATION FUNCTIONS
+// =====================================================
 
-    // We'll store all our piece types in an object for easy access
-    const PIECES = {
-        // I-Piece: The long straight piece
-        I: [
-            [0, 0, 0, 0],
-            [1, 1, 1, 1],
-            [0, 0, 0, 0],
-            [0, 0, 0, 0]
-        ],
-        
-        // O-Piece: The square piece
-        O: [
-            [1, 1],
-            [1, 1]
-        ],
-        
-        // T-Piece: The T-shaped piece
-        // Looks like:  █
-        //            ███
-        T: [
-            [0, 1, 0],
-            [1, 1, 1],
-            [0, 0, 0]
-        ],
-        
-        // S-Piece: The S-shaped piece
-        // Looks like:  ██
-        //            ██
-        S: [
-            [0, 1, 1],
-            [1, 1, 0],
-            [0, 0, 0]
-        ],
-        
-        // Z-Piece: The Z-shaped piece
-        // Looks like: ██
-        //              ██
-        Z: [
-            [1, 1, 0],
-            [0, 1, 1],
-            [0, 0, 0]
-        ],
-        
-        // J-Piece: The J-shaped piece
-        // Looks like: █
-        //            ███
-        J: [
-            [1, 0, 0],
-            [1, 1, 1],
-            [0, 0, 0]
-        ],
-        
-        // L-Piece: The L-shaped piece
-        // Looks like:   █
-        //            ███
-        L: [
-            [0, 0, 1],
-            [1, 1, 1],
-            [0, 0, 0]
-        ]
-    };
+// Calculate the cost of an upgrade for a specific board
+function getBoardCost(baseCost: number, boardIndex: number): number {
+    return Math.round(baseCost * Math.pow(COST_MULTIPLIER, boardIndex));
+}
 
-    // PIECE COLORS
-    // These are hex color codes (# followed by Red-Green-Blue values)
-    const PIECE_COLORS = {
-        I: '#00F0F0',  // Cyan (light blue)
-        O: '#F0F000',  // Yellow
-        T: '#A000F0',  // Purple
-        S: '#00F000',  // Green
-        Z: '#F00000',  // Red
-        J: '#0000F0',  // Blue
-        L: '#F0A000'   // Orange
-    };
+// Calculate the cost to reset a specific board after it loses
+function getResetCost(boardIndex: number): number {
+    return Math.round(BASE_COSTS.RESET_BOARD * Math.pow(COST_MULTIPLIER, boardIndex));
+}
 
-    // TYPE DEFINITIONS - This helps TypeScript understand our piece structure
-    // A "type" in TypeScript is like a blueprint that describes what something looks like
+// Calculate the cost to unlock the next board
+function getNextBoardUnlockCost(currentBoardCount: number): number {
+    return Math.round(BASE_COSTS.UNLOCK_NEXT_BOARD * Math.pow(COST_MULTIPLIER, currentBoardCount - 1));
+}
 
-    // This says "a PieceType can only be one of these exact strings"
-    type PieceType = 'I' | 'O' | 'T' | 'S' | 'Z' | 'J' | 'L';
+// =====================================================
+// PIECE DEFINITIONS
+// =====================================================
+const PIECES: { [key: string]: number[][] } = {
+    I: [
+        [0, 0, 0, 0],
+        [1, 1, 1, 1],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0]
+    ],
+    O: [
+        [1, 1],
+        [1, 1]
+    ],
+    T: [
+        [0, 1, 0],
+        [1, 1, 1],
+        [0, 0, 0]
+    ],
+    S: [
+        [0, 1, 1],
+        [1, 1, 0],
+        [0, 0, 0]
+    ],
+    Z: [
+        [1, 1, 0],
+        [0, 1, 1],
+        [0, 0, 0]
+    ],
+    J: [
+        [1, 0, 0],
+        [1, 1, 1],
+        [0, 0, 0]
+    ],
+    L: [
+        [0, 0, 1],
+        [1, 1, 1],
+        [0, 0, 0]
+    ]
+};
 
-    // This describes what a piece looks like when it's actively in play
-    interface ActivePiece {
-        type: PieceType;        // Which of the 7 pieces it is
-        shape: number[][];      // The 2D array pattern of blocks
-        x: number;              // Horizontal position on the board (in grid units, not pixels)
-        y: number;              // Vertical position on the board (in grid units, not pixels)
-        color: string;          // The hex color code for this piece
-    }
+const PIECE_COLORS: { [key: string]: string } = {
+    I: '#00F0F0',
+    O: '#F0F000',
+    T: '#A000F0',
+    S: '#00F000',
+    Z: '#F00000',
+    J: '#0000F0',
+    L: '#F0A000'
+};
 
-    // PIECE MANAGEMENT VARIABLES
-    // This will hold the piece that's currently falling
-    // It starts as null because there's no piece when the game first loads
-    let currentPiece: ActivePiece | null = null;
+// =====================================================
+// TYPE DEFINITIONS
+// =====================================================
+type PieceType = 'I' | 'O' | 'T' | 'S' | 'Z' | 'J' | 'L';
 
-    // This will hold all the pieces that have already landed and locked in place
-    // It's a 2D array matching our grid size, where each cell stores a color or null
-    let boardState: (string | null)[][] = [];
+interface ActivePiece {
+    type: PieceType;
+    shape: number[][];
+    x: number;
+    y: number;
+    color: string;
+}
 
-    // GAME STATE VARIABLES
-    let isGameOver = false;  // Track if the game has ended
-    let nextPiece: PieceType | null = null;  // Track which piece is coming next
-    let isPaused = false;  // Track if game is paused for dialogue
-
-    // SECOND BOARD VARIABLES
-    const UNLOCK_SECOND_BOARD_COST = 25;  // Cost to unlock the second board
-    let secondBoardUnlocked = false;  // Track if second board is unlocked
-
-    // Cost to reset board 1 after it loses (only applies when board 2 is unlocked)
-    const RESET_BOARD_1_COST = 50;
-
-    // Track which board is currently being controlled by the player
-    let activePlayerBoard = 1;  // 1 or 2, shows which board the player controls
-
-    // Variables to track if requirements for second board are met
-    function checkSecondBoardRequirements(): boolean {
-        // Check if board 1 AI is maxed out
-        return aiPlayerHired && aiHardDropUnlocked && aiSpeedLevel >= MAX_AI_SPEED_UPGRADES;
-    }
-
-    // Variables to track if requirements for third board are met
-    function checkThirdBoardRequirements(): boolean {
-        // Check if board 2 AI is maxed out
-        return aiPlayerHiredBoard2 && aiHardDropUnlockedBoard2 && aiSpeedLevelBoard2 >= MAX_AI_SPEED_UPGRADES;
-    }
-
-    // POINTS SYSTEM VARIABLES
-    // Track the player's current spendable points
-    let points = 0;
-
-    // Track total lines cleared (for statistics)
-    let totalLinesCleared = 0;
-
-    // UPGRADE SYSTEM VARIABLES
-    let hardDropUnlocked = false;  // Track if hard drop has been purchased
-    const HARD_DROP_COST = 1;  // Cost to unlock hard drop
-    const AI_PLAYER_COST = 5;  // Cost for hiring an AI player
-    let aiHardDropUnlocked = false;  // Track if AI can use hard drop
-    const AI_HARD_DROP_COST = 5;  // Cost for AI hard drop upgrade
-    let aiSpeedLevel = 0;  // Current speed upgrade level (0-5)
-    const AI_SPEED_UPGRADE_COST = 10;  // Cost to upgrade AI speed
-    const MAX_AI_SPEED_UPGRADES = 5;  // Maximum number of speed upgrades
-    const BASE_AI_SPEED = 300;  // Starting AI speed in milliseconds
-
-    // =====================================================
-    // FORCE NEXT PIECE UPGRADE VARIABLES
-    // =====================================================
-    // This upgrade allows players to choose the next piece for a cost
-    let forceNextPieceUnlocked = false;  // Track if the upgrade has been purchased (global/permanent)
-    const FORCE_NEXT_PIECE_UNLOCK_COST = 20;  // One-time cost to unlock the feature
-    const FORCE_NEXT_PIECE_USE_COST = 5;  // Cost each time you force a specific piece
-
-    // Track if AI player is hired (not functional yet, just for UI)
-    let aiPlayerHired = false;
-
-    // TIMING VARIABLES - Control how fast pieces fall
-    // Track the last time we moved a piece down
-    let lastDropTime = 0;
-
-    // AI PLAYER VARIABLES
-    let aiEnabled = false;  // Is the AI currently playing?
-    let aiSpeed = 300;  // How fast the AI moves (milliseconds between actions)
-    let aiLastMoveTime = 0;  // Track timing for AI moves
-    let aiTargetPosition: { x: number, rotation: number } | null = null;  // Where AI wants to place the piece
-    let aiMoving = false;  // Is AI currently moving a piece?
-
-        // SECOND BOARD GAME STATE
-    let currentPieceBoard2: ActivePiece | null = null;
-    let boardStateBoard2: (string | null)[][] = [];
-    let isGameOverBoard2 = false;
-    let nextPieceBoard2: PieceType | null = null;
-    let totalLinesClearedBoard2 = 0;
-
-    // Board 2 AI variables (independent from board 1)
-    let aiPlayerHiredBoard2 = false;
-    let aiEnabledBoard2 = false;
-    let aiHardDropUnlockedBoard2 = false;
-    let aiSpeedLevelBoard2 = 0;
-    let aiSpeedBoard2 = BASE_AI_SPEED;
-    let aiLastMoveTimeBoard2 = 0;
-    let aiTargetPositionBoard2: { x: number, rotation: number } | null = null;
-    let aiMovingBoard2 = false;
+// Board interface - represents a single game board with all its state
+interface Board {
+    index: number;                    // 0-6 (board number - 1)
+    grid: (string | null)[][];        // The board's block grid
+    currentPiece: ActivePiece | null; // Currently falling piece
+    nextPiece: PieceType | null;      // Next piece in queue
+    isGameOver: boolean;              // Has this board lost?
+    lastDropTime: number;             // For piece falling timing
     
+    // AI state
+    aiHired: boolean;
+    aiEnabled: boolean;
+    aiHardDropUnlocked: boolean;
+    aiSpeedLevel: number;
+    aiSpeed: number;
+    aiLastMoveTime: number;
+    aiTargetPosition: { x: number, rotation: number } | null;
+    aiMoving: boolean;
+    
+    // UI references
+    canvas: HTMLCanvasElement | null;
+    container: HTMLElement | null;
+    
+    // Status flags
+    isMaxedOut: boolean;
+    isMinified: boolean;
+}
 
-    // Board 2 timing
-    let lastDropTimeBoard2 = 0;
+// =====================================================
+// GLOBAL STATE
+// =====================================================
+let boards: Board[] = [];
+let activeBoardIndex: number = 0;
+let globalPoints: number = 0;
+let globalLinesCleared: number = 0;
 
-    // THIRD BOARD GAME STATE
-    let thirdBoardUnlocked = false;
-    let currentPieceBoard3: ActivePiece | null = null;
-    let boardStateBoard3: (string | null)[][] = [];
-    let isGameOverBoard3 = false;
-    let nextPieceBoard3: PieceType | null = null;
-    let totalLinesClearedBoard3 = 0;
+// Global upgrades
+let hardDropUnlocked: boolean = false;
+let forceNextPieceUnlocked: boolean = false;
 
-    // Board 3 AI variables (independent from boards 1 and 2)
-    let aiPlayerHiredBoard3 = false;
-    let aiEnabledBoard3 = false;
-    let aiHardDropUnlockedBoard3 = false;
-    let aiSpeedLevelBoard3 = 0;
-    let aiSpeedBoard3 = BASE_AI_SPEED;
-    let aiLastMoveTimeBoard3 = 0;
-    let aiTargetPositionBoard3: { x: number, rotation: number } | null = null;
-    let aiMovingBoard3 = false;
+// Game control state
+let isGameOver: boolean = false;
+let isPaused: boolean = false;
 
-    // Board 3 timing
-    let lastDropTimeBoard3 = 0;
+// =====================================================
+// DIALOGUE SYSTEM STATE
+// =====================================================
+let dialogueQueue: string[] = [];
+let currentDialogue: string | null = null;
+let shownDialogues: Set<string> = new Set();
+let displayedDialogues: Set<string> = new Set();
+let tutorialsEnabled: boolean = true;
 
-    // Cost to unlock third board and reset costs
-    const UNLOCK_THIRD_BOARD_COST = 200;
-    const RESET_BOARD_2_COST = 100;
-
-    // How many milliseconds between automatic drops (1000ms = 1 second)
-    // Lower number = faster falling
-    const DROP_SPEED = 1000;  // Piece falls once per second
-
-    // Set the canvas size to accommodate our board plus padding on all sides
-    canvas.width = BOARD_WIDTH + (PADDING * 2);
-    canvas.height = BOARD_HEIGHT + (PADDING * 2);
-
-    // Give the canvas an ID for board 1
-    // canvas.id = 'game-canvas-1';
-
-// Canvas visual styling – layout is handled by index.html now
-canvas.style.position = '';
-canvas.style.left = '';
-canvas.style.top = '';
-canvas.style.transform = '';
-canvas.style.boxShadow = '0 0 4px rgba(0, 0, 0, 0.3)';
-
-
-    // Optional: Add a subtle shadow for depth
-    canvas.style.boxShadow = '0 0 4px rgba(0, 0, 0, 0.3)';
-
-// ===============================================
-// DIALOGUE BOX SYSTEM FOR UPGRADE EXPLANATIONS
-// ===============================================
-// Add this section to your main.ts file after the global variables section (around line 220)
-
-// Dialogue system state variables
-let dialogueQueue: string[] = [];  // Queue of dialogue IDs to show
-let currentDialogue: string | null = null;  // Currently showing dialogue
-let shownDialogues: Set<string> = new Set();  // Features unlocked (for help button review)
-let displayedDialogues: Set<string> = new Set();  // Dialogues actually shown on screen
-let tutorialsEnabled = true;  // Can be toggled via checkbox in header
-
-// Dialogue content definitions - each upgrade gets an explanation
 const DIALOGUE_CONTENT: { [key: string]: { title: string; description: string } } = {
     'global-harddrop': {
         title: 'Unlock Hard Drop',
-        description: 'Spend 1 point to unlock Hard Drop. Enable using the SPACE BAR to instantly drop pieces to the bottom. This power-up is permanent once unlocked - it works across all games!'
+        description: 'Spend 1 point to unlock Hard Drop. Use SPACE BAR to instantly drop pieces. This is permanent!'
     },
-    'hire-ai-1': {
+    'hire-ai': {
         title: 'Hire Basic AI Player',
-        description: 'Hire a Basic AI to play automatically on this board. It analyzes the best position for each piece and plays strategically.'
+        description: 'Hire a Basic AI to play automatically on this board. It analyzes the best position for each piece.'
     },
-    'ai-harddrop-1': {
+    'ai-harddrop': {
         title: 'Enable AI Hard Drop',
-        description: 'Give AI the ability to instantly place pieces instead of moving them slowly. This dramatically speeds up gameplay and point generation. This upgrade is permanent!'
+        description: 'Give AI the ability to instantly place pieces. This dramatically speeds up point generation!'
     },
-    'ai-speed-1': {
+    'ai-speed': {
         title: 'Increase AI Speed',
-        description: 'Make your AI move faster! Each speed upgrade reduces the delay between AI moves. You can upgrade this multiple times for even faster play.'
+        description: 'Make your AI move faster! Each upgrade reduces delay between moves. Upgrade up to 5 times.'
     },
-    'board-2': {
-        title: 'Unlock Second Board',
-        description: 'Your board has maxed out on upgrades! Unlock a second board to level up your points earning potential.'
+    'unlock-board': {
+        title: 'Unlock New Board',
+        description: 'Your board is maxed out! Unlock a new board to multiply your points earning potential.'
     },
     'force-next-piece': {
         title: 'Unlock Force Next Piece',
-        description: 'Spend 25 points to unlock Force Next Piece. Once unlocked, you can spend 5 points anytime to change the upcoming piece to whichever shape you want. Click any piece icon below the preview to force that piece next!'
+        description: 'Once unlocked, spend points to change the upcoming piece to whichever shape you want.'
     },
 };
 
-/**
- * Creates the dialogue overlay and box HTML structure
- * This should be called once during game initialization
- */
+// =====================================================
+// BOARD FACTORY FUNCTIONS
+// =====================================================
+
+function createEmptyGrid(): (string | null)[][] {
+    const grid: (string | null)[][] = [];
+    for (let row = 0; row < GRID_HEIGHT; row++) {
+        const newRow: (string | null)[] = [];
+        for (let col = 0; col < GRID_WIDTH; col++) {
+            newRow.push(null);
+        }
+        grid.push(newRow);
+    }
+    return grid;
+}
+
+function createBoard(index: number): Board {
+    return {
+        index,
+        grid: createEmptyGrid(),
+        currentPiece: null,
+        nextPiece: null,
+        isGameOver: false,
+        lastDropTime: 0,
+        aiHired: false,
+        aiEnabled: false,
+        aiHardDropUnlocked: false,
+        aiSpeedLevel: 0,
+        aiSpeed: BASE_AI_SPEED,
+        aiLastMoveTime: 0,
+        aiTargetPosition: null,
+        aiMoving: false,
+        canvas: null,
+        container: null,
+        isMaxedOut: false,
+        isMinified: false,
+    };
+}
+
+function isBoardMaxedOut(board: Board): boolean {
+    return board.aiHired && 
+           board.aiHardDropUnlocked && 
+           board.aiSpeedLevel >= MAX_AI_SPEED_UPGRADES;
+}
+
+function canUnlockNextBoard(): boolean {
+    if (boards.length >= MAX_BOARDS) return false;
+    if (boards.length === 0) return false;
+    const lastBoard = boards[boards.length - 1];
+    return isBoardMaxedOut(lastBoard);
+}
+
+function getActiveBoard(): Board | null {
+    return boards[activeBoardIndex] || null;
+}
+
+// =====================================================
+// PIECE FUNCTIONS
+// =====================================================
+
+function getRandomPieceType(): PieceType {
+    const types: PieceType[] = ['I', 'O', 'T', 'S', 'Z', 'J', 'L'];
+    return types[Math.floor(Math.random() * types.length)];
+}
+
+function createPiece(type: PieceType): ActivePiece {
+    const shape = PIECES[type].map(row => [...row]);
+    return {
+        type,
+        shape,
+        x: Math.floor(GRID_WIDTH / 2) - Math.floor(shape[0].length / 2),
+        y: 0,
+        color: PIECE_COLORS[type]
+    };
+}
+
+function rotateShape(shape: number[][]): number[][] {
+    const rows = shape.length;
+    const cols = shape[0].length;
+    const rotated: number[][] = [];
+    
+    for (let col = 0; col < cols; col++) {
+        const newRow: number[] = [];
+        for (let row = rows - 1; row >= 0; row--) {
+            newRow.push(shape[row][col]);
+        }
+        rotated.push(newRow);
+    }
+    
+    return rotated;
+}
+
+// =====================================================
+// COLLISION DETECTION
+// =====================================================
+
+function checkCollision(board: Board): boolean {
+    if (!board.currentPiece) return false;
+    
+    const piece = board.currentPiece;
+    
+    for (let row = 0; row < piece.shape.length; row++) {
+        for (let col = 0; col < piece.shape[row].length; col++) {
+            if (!piece.shape[row][col]) continue;
+            
+            const boardX = piece.x + col;
+            const boardY = piece.y + row;
+            
+            if (boardX < 0 || boardX >= GRID_WIDTH) return true;
+            if (boardY >= GRID_HEIGHT) return true;
+            if (boardY >= 0 && board.grid[boardY][boardX]) return true;
+        }
+    }
+    
+    return false;
+}
+
+function checkCollisionForTest(piece: ActivePiece, testGrid: (string | null)[][]): boolean {
+    for (let row = 0; row < piece.shape.length; row++) {
+        for (let col = 0; col < piece.shape[row].length; col++) {
+            if (!piece.shape[row][col]) continue;
+            
+            const boardX = piece.x + col;
+            const boardY = piece.y + row;
+            
+            if (boardX < 0 || boardX >= GRID_WIDTH || boardY >= GRID_HEIGHT) {
+                return true;
+            }
+            
+            if (boardY >= 0 && testGrid[boardY][boardX]) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// =====================================================
+// PIECE MOVEMENT
+// =====================================================
+
+function movePieceDown(board: Board): boolean {
+    if (!board.currentPiece) return false;
+    
+    board.currentPiece.y++;
+    
+    if (checkCollision(board)) {
+        board.currentPiece.y--;
+        lockPiece(board);
+        spawnNewPiece(board);
+        return false;
+    }
+    
+    return true;
+}
+
+function movePieceHorizontally(board: Board, direction: number): boolean {
+    if (!board.currentPiece) return false;
+    
+    const originalX = board.currentPiece.x;
+    board.currentPiece.x += direction;
+    
+    if (checkCollision(board)) {
+        board.currentPiece.x = originalX;
+        return false;
+    }
+    
+    return true;
+}
+
+function rotatePiece(board: Board): boolean {
+    if (!board.currentPiece) return false;
+    if (board.currentPiece.type === 'O') return false;
+    
+    const originalShape = board.currentPiece.shape;
+    board.currentPiece.shape = rotateShape(originalShape);
+    
+    if (!checkCollision(board)) {
+        return true;
+    }
+    
+    // Wall kicks
+    const kicks = [1, -1, 2, -2];
+    for (const kick of kicks) {
+        board.currentPiece.x += kick;
+        if (!checkCollision(board)) {
+            return true;
+        }
+        board.currentPiece.x -= kick;
+    }
+    
+    // Floor kick
+    board.currentPiece.y -= 1;
+    if (!checkCollision(board)) {
+        return true;
+    }
+    board.currentPiece.y += 1;
+    
+    // Revert rotation
+    board.currentPiece.shape = originalShape;
+    return false;
+}
+
+function hardDrop(board: Board): void {
+    if (!board.currentPiece) return;
+    
+    while (!checkCollision(board)) {
+        board.currentPiece.y++;
+    }
+    board.currentPiece.y--;
+    
+    lockPiece(board);
+    spawnNewPiece(board);
+}
+
+// =====================================================
+// PIECE LOCKING AND LINE CLEARING
+// =====================================================
+
+function lockPiece(board: Board): void {
+    if (!board.currentPiece) return;
+    
+    const piece = board.currentPiece;
+    
+    for (let row = 0; row < piece.shape.length; row++) {
+        for (let col = 0; col < piece.shape[row].length; col++) {
+            if (piece.shape[row][col]) {
+                const boardX = piece.x + col;
+                const boardY = piece.y + row;
+                
+                if (boardY >= 0 && boardY < GRID_HEIGHT && 
+                    boardX >= 0 && boardX < GRID_WIDTH) {
+                    board.grid[boardY][boardX] = piece.color;
+                }
+            }
+        }
+    }
+    
+    board.currentPiece = null;
+    clearLines(board);
+}
+
+function clearLines(board: Board): number {
+    let linesCleared = 0;
+    
+    for (let row = GRID_HEIGHT - 1; row >= 0; row--) {
+        let isFull = true;
+        for (let col = 0; col < GRID_WIDTH; col++) {
+            if (!board.grid[row][col]) {
+                isFull = false;
+                break;
+            }
+        }
+        
+        if (isFull) {
+            linesCleared++;
+            board.grid.splice(row, 1);
+            const emptyRow: (string | null)[] = new Array(GRID_WIDTH).fill(null);
+            board.grid.unshift(emptyRow);
+            row++;
+        }
+    }
+    
+    if (linesCleared > 0) {
+        globalLinesCleared += linesCleared;
+        globalPoints += linesCleared;
+        updatePointsDisplay();
+        flashEffect(board, linesCleared);
+    }
+    
+    return linesCleared;
+}
+
+function spawnNewPiece(board: Board): void {
+    const pieceType = board.nextPiece || getRandomPieceType();
+    board.nextPiece = getRandomPieceType();
+    board.currentPiece = createPiece(pieceType);
+    
+    if (checkCollision(board)) {
+        handleBoardGameOver(board);
+        return;
+    }
+    
+    // Reset AI state for new piece
+    board.aiTargetPosition = null;
+    board.aiMoving = false;
+    
+    updateNextPiecePreview(board);
+}
+
+function handleBoardGameOver(board: Board): void {
+    board.isGameOver = true;
+    board.currentPiece = null;
+    
+    if (board.aiEnabled) {
+        board.aiEnabled = false;
+        board.aiTargetPosition = null;
+        board.aiMoving = false;
+    }
+    
+    // Check if this is the active board (true game over)
+    if (board.index === activeBoardIndex) {
+        isGameOver = true;
+        showGameOverScreen();
+    } else {
+        // A minified AI board lost - show reset overlay
+        showBoardLostOverlay(board);
+    }
+}
+
+// =====================================================
+// VISUAL EFFECTS
+// =====================================================
+
+function flashEffect(board: Board, linesCleared: number): void {
+    const targetCanvas = board.canvas || canvas;
+    
+    const originalFilter = targetCanvas.style.filter;
+    const brightness = 1 + (linesCleared * 0.3);
+    targetCanvas.style.filter = `brightness(${brightness})`;
+    
+    setTimeout(() => {
+        targetCanvas.style.filter = originalFilter;
+    }, 200);
+}
+
+// =====================================================
+// AI SYSTEM
+// =====================================================
+
+function simulateMove(board: Board, piece: ActivePiece, targetX: number, rotation: number): (string | null)[][] | null {
+    const testBoard = board.grid.map(row => [...row]);
+    
+    let testShape = piece.shape;
+    for (let r = 0; r < rotation; r++) {
+        testShape = rotateShape(testShape);
+    }
+    
+    const testPiece: ActivePiece = {
+        type: piece.type,
+        shape: testShape,
+        x: targetX,
+        y: 0,
+        color: piece.color
+    };
+    
+    if (checkCollisionForTest(testPiece, testBoard)) {
+        return null;
+    }
+    
+    while (!checkCollisionForTest(testPiece, testBoard)) {
+        testPiece.y++;
+    }
+    testPiece.y--;
+    
+    for (let row = 0; row < testPiece.shape.length; row++) {
+        for (let col = 0; col < testPiece.shape[row].length; col++) {
+            if (testPiece.shape[row][col]) {
+                const boardY = testPiece.y + row;
+                const boardX = testPiece.x + col;
+                if (boardY >= 0 && boardY < GRID_HEIGHT && boardX >= 0 && boardX < GRID_WIDTH) {
+                    testBoard[boardY][boardX] = testPiece.color;
+                }
+            }
+        }
+    }
+    
+    return testBoard;
+}
+
+function evaluateBoardState(testBoard: (string | null)[][]): number {
+    let score = 0;
+    
+    // Count complete lines (huge bonus)
+    let completeLines = 0;
+    for (let row = 0; row < GRID_HEIGHT; row++) {
+        let isFull = true;
+        for (let col = 0; col < GRID_WIDTH; col++) {
+            if (!testBoard[row][col]) {
+                isFull = false;
+                break;
+            }
+        }
+        if (isFull) completeLines++;
+    }
+    score += completeLines * 1000;
+    
+    // Penalize height
+    let maxHeight = 0;
+    for (let col = 0; col < GRID_WIDTH; col++) {
+        for (let row = 0; row < GRID_HEIGHT; row++) {
+            if (testBoard[row][col]) {
+                maxHeight = Math.max(maxHeight, GRID_HEIGHT - row);
+                break;
+            }
+        }
+    }
+    score -= maxHeight * 10;
+    
+    // Penalize holes
+    let holes = 0;
+    for (let col = 0; col < GRID_WIDTH; col++) {
+        let foundBlock = false;
+        for (let row = 0; row < GRID_HEIGHT; row++) {
+            if (testBoard[row][col]) {
+                foundBlock = true;
+            } else if (foundBlock) {
+                holes++;
+            }
+        }
+    }
+    score -= holes * 50;
+    
+    // Penalize bumpiness
+    let bumpiness = 0;
+    let prevHeight = 0;
+    for (let col = 0; col < GRID_WIDTH; col++) {
+        let colHeight = 0;
+        for (let row = 0; row < GRID_HEIGHT; row++) {
+            if (testBoard[row][col]) {
+                colHeight = GRID_HEIGHT - row;
+                break;
+            }
+        }
+        if (col > 0) {
+            bumpiness += Math.abs(colHeight - prevHeight);
+        }
+        prevHeight = colHeight;
+    }
+    score -= bumpiness * 5;
+    
+    return score;
+}
+
+function calculateBestMove(board: Board): { x: number, rotation: number } | null {
+    if (!board.currentPiece) return null;
+    
+    let bestScore = -Infinity;
+    let bestMove = null;
+    
+    const maxRotations = board.currentPiece.type === 'O' ? 1 : 4;
+    
+    for (let rotation = 0; rotation < maxRotations; rotation++) {
+        let testShape = board.currentPiece.shape;
+        for (let r = 0; r < rotation; r++) {
+            testShape = rotateShape(testShape);
+        }
+        
+        // Find actual bounds of piece
+        let minCol = testShape[0].length;
+        let maxCol = -1;
+        for (let row = 0; row < testShape.length; row++) {
+            for (let col = 0; col < testShape[row].length; col++) {
+                if (testShape[row][col]) {
+                    minCol = Math.min(minCol, col);
+                    maxCol = Math.max(maxCol, col);
+                }
+            }
+        }
+        const actualWidth = maxCol - minCol + 1;
+        const leftOffset = minCol;
+        
+        for (let x = -leftOffset; x <= GRID_WIDTH - actualWidth - leftOffset; x++) {
+            const resultBoard = simulateMove(board, board.currentPiece, x, rotation);
+            
+            if (resultBoard) {
+                const score = evaluateBoardState(resultBoard);
+                
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestMove = { x, rotation };
+                }
+            }
+        }
+    }
+    
+    if (!bestMove && board.currentPiece) {
+        bestMove = { x: board.currentPiece.x, rotation: 0 };
+    }
+    
+    return bestMove;
+}
+
+function executeAIMove(board: Board): void {
+    if (!board.currentPiece || !board.aiTargetPosition || !board.aiEnabled) return;
+    
+    // Track rotations
+    if (!(board.currentPiece as any).aiRotations) {
+        (board.currentPiece as any).aiRotations = 0;
+    }
+    
+    const currentRotations = (board.currentPiece as any).aiRotations;
+    const targetRotation = board.aiTargetPosition.rotation;
+    
+    // Step 1: Rotate
+    if (currentRotations < targetRotation) {
+        if (rotatePiece(board)) {
+            (board.currentPiece as any).aiRotations++;
+        } else {
+            (board.currentPiece as any).aiRotations = targetRotation;
+        }
+        return;
+    }
+    
+    // Step 2: Move horizontally
+    const currentX = board.currentPiece.x;
+    const targetX = board.aiTargetPosition.x;
+    
+    if (currentX !== targetX) {
+        const direction = targetX > currentX ? 1 : -1;
+        
+        if (!movePieceHorizontally(board, direction)) {
+            movePieceDown(board);
+            board.aiTargetPosition = null;
+            board.aiMoving = false;
+        }
+        return;
+    }
+    
+    // Step 3: Drop
+    if (board.aiHardDropUnlocked) {
+        hardDrop(board);
+    } else {
+        movePieceDown(board);
+    }
+    
+    board.aiTargetPosition = null;
+    board.aiMoving = false;
+}
+
+function updateAI(board: Board, currentTime: number): void {
+    if (!board.aiEnabled || !board.currentPiece) return;
+    
+    // Safety timeout
+    if (!(board.currentPiece as any).aiStartTime) {
+        (board.currentPiece as any).aiStartTime = currentTime;
+    }
+    
+    const pieceAge = currentTime - (board.currentPiece as any).aiStartTime;
+    if (pieceAge > 5000) {
+        movePieceDown(board);
+        board.aiTargetPosition = null;
+        board.aiMoving = false;
+        return;
+    }
+    
+    // Calculate target if needed
+    if (!board.aiTargetPosition && !board.aiMoving) {
+        board.aiTargetPosition = calculateBestMove(board);
+        board.aiMoving = true;
+        
+        if (!board.aiTargetPosition) {
+            movePieceDown(board);
+            board.aiMoving = false;
+            return;
+        }
+    }
+    
+    // Execute moves at AI speed
+    if (currentTime - board.aiLastMoveTime > board.aiSpeed) {
+        executeAIMove(board);
+        board.aiLastMoveTime = currentTime;
+    }
+}
+
+// =====================================================
+// DRAWING FUNCTIONS
+// =====================================================
+
+function drawBoard(board: Board): void {
+    const targetCanvas = board.canvas || canvas;
+    const targetCtx = targetCanvas.getContext('2d');
+    if (!targetCtx) return;
+    
+    const cellSize = board.isMinified ? CELL_SIZE_MINI : CELL_SIZE;
+    const padding = board.isMinified ? PADDING_MINI : PADDING;
+    const boardWidth = GRID_WIDTH * cellSize;
+    const boardHeight = GRID_HEIGHT * cellSize;
+    
+    // Clear canvas
+    targetCtx.clearRect(0, 0, targetCanvas.width, targetCanvas.height);
+    
+    // Draw background
+    targetCtx.fillStyle = '#000000';
+    targetCtx.fillRect(padding, padding, boardWidth, boardHeight);
+    
+    // Draw grid lines
+    targetCtx.strokeStyle = '#3b3b3bff';
+    targetCtx.lineWidth = board.isMinified ? 0.5 : 1;
+    
+    for (let col = 0; col <= GRID_WIDTH; col++) {
+        const x = padding + (col * cellSize);
+        targetCtx.beginPath();
+        targetCtx.moveTo(x, padding);
+        targetCtx.lineTo(x, padding + boardHeight);
+        targetCtx.stroke();
+    }
+    
+    for (let row = 0; row <= GRID_HEIGHT; row++) {
+        const y = padding + (row * cellSize);
+        targetCtx.beginPath();
+        targetCtx.moveTo(padding, y);
+        targetCtx.lineTo(padding + boardWidth, y);
+        targetCtx.stroke();
+    }
+    
+    // Draw border
+    targetCtx.strokeStyle = '#666666';
+    targetCtx.lineWidth = board.isMinified ? 1 : 2;
+    targetCtx.strokeRect(padding, padding, boardWidth, boardHeight);
+}
+
+function drawBlock(board: Board, x: number, y: number, color: string): void {
+    const targetCanvas = board.canvas || canvas;
+    const targetCtx = targetCanvas.getContext('2d');
+    if (!targetCtx) return;
+    
+    const cellSize = board.isMinified ? CELL_SIZE_MINI : CELL_SIZE;
+    const padding = board.isMinified ? PADDING_MINI : PADDING;
+    
+    const pixelX = padding + (x * cellSize);
+    const pixelY = padding + (y * cellSize);
+    
+    // Main block
+    targetCtx.fillStyle = color;
+    targetCtx.fillRect(pixelX, pixelY, cellSize, cellSize);
+    
+    // Light border (top-left)
+    targetCtx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+    targetCtx.lineWidth = board.isMinified ? 1 : 2;
+    targetCtx.beginPath();
+    targetCtx.moveTo(pixelX, pixelY + cellSize);
+    targetCtx.lineTo(pixelX, pixelY);
+    targetCtx.lineTo(pixelX + cellSize, pixelY);
+    targetCtx.stroke();
+    
+    // Dark border (bottom-right)
+    targetCtx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+    targetCtx.beginPath();
+    targetCtx.moveTo(pixelX + cellSize, pixelY);
+    targetCtx.lineTo(pixelX + cellSize, pixelY + cellSize);
+    targetCtx.lineTo(pixelX, pixelY + cellSize);
+    targetCtx.stroke();
+}
+
+function drawBoardState(board: Board): void {
+    for (let row = 0; row < GRID_HEIGHT; row++) {
+        for (let col = 0; col < GRID_WIDTH; col++) {
+            const color = board.grid[row][col];
+            if (color) {
+                drawBlock(board, col, row, color);
+            }
+        }
+    }
+}
+
+function drawCurrentPiece(board: Board): void {
+    if (!board.currentPiece) return;
+    
+    for (let row = 0; row < board.currentPiece.shape.length; row++) {
+        for (let col = 0; col < board.currentPiece.shape[row].length; col++) {
+            if (board.currentPiece.shape[row][col]) {
+                const boardX = board.currentPiece.x + col;
+                const boardY = board.currentPiece.y + row;
+                drawBlock(board, boardX, boardY, board.currentPiece.color);
+            }
+        }
+    }
+}
+
+// =====================================================
+// UI CREATION FUNCTIONS
+// =====================================================
+
+function createGlobalHeader(): void {
+    const header = document.createElement('div');
+    header.id = 'global-header';
+    header.style.position = 'fixed';
+    header.style.top = '0';
+    header.style.left = '0';
+    header.style.right = '0';
+    header.style.height = '120px';
+    header.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+    header.style.borderBottom = '2px solid #444';
+    header.style.display = 'flex';
+    header.style.alignItems = 'center';
+    header.style.justifyContent = 'center';
+    header.style.gap = '60px';
+    header.style.padding = '20px';
+    header.style.zIndex = '1000';
+    header.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.3)';
+    
+    // Title section
+    const titleSection = document.createElement('div');
+    titleSection.style.textAlign = 'center';
+    
+    const title = document.createElement('h1');
+    title.textContent = 'IDLETRIS';
+    title.style.margin = '0';
+    title.style.fontSize = '36px';
+    title.style.color = '#4CAF50';
+    title.style.textShadow = '3px 3px 6px rgba(0,0,0,0.7)';
+    title.style.fontFamily = 'Arial, sans-serif';
+    title.style.letterSpacing = '4px';
+    titleSection.appendChild(title);
+    
+    // Points section
+    const pointsSection = document.createElement('div');
+    pointsSection.style.textAlign = 'center';
+    pointsSection.style.padding = '15px 30px';
+    pointsSection.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+    pointsSection.style.borderRadius = '10px';
+    pointsSection.innerHTML = `
+        <div style="font-size: 14px; color: #888; margin-bottom: 5px;">Points</div>
+        <div style="font-size: 32px; font-weight: bold; color: #4CAF50;">
+            <span id="global-points-value">0</span>
+        </div>
+    `;
+    
+    // Score section (global lines)
+    const scoreSection = document.createElement('div');
+    scoreSection.style.textAlign = 'center';
+    scoreSection.style.padding = '15px 30px';
+    scoreSection.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+    scoreSection.style.borderRadius = '10px';
+    scoreSection.innerHTML = `
+        <div style="font-size: 14px; color: #888; margin-bottom: 5px;">Score</div>
+        <div style="font-size: 32px; font-weight: bold; color: #2196F3;">
+            <span id="global-score-value">0</span>
+        </div>
+    `;
+    
+    // Controls section
+    const controlsSection = document.createElement('div');
+    controlsSection.id = 'global-controls-section';
+    controlsSection.style.textAlign = 'center';
+    controlsSection.style.padding = '15px 25px';
+    controlsSection.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+    controlsSection.style.borderRadius = '10px';
+    controlsSection.style.fontSize = '12px';
+    controlsSection.style.color = '#aaa';
+    controlsSection.innerHTML = `
+        <div style="margin-bottom: 8px; font-weight: bold; color: #fff;">Controls</div>
+        <div>← → : Move | ↑ : Rotate</div>
+        <div>↓ : Soft Drop | <span id="space-control-text" style="opacity: 0.5;">Space : Locked</span></div>
+    `;
+    
+    // Global upgrades section
+    const globalUpgradesSection = document.createElement('div');
+    globalUpgradesSection.id = 'global-upgrades';
+    globalUpgradesSection.style.display = 'flex';
+    globalUpgradesSection.style.gap = '15px';
+    globalUpgradesSection.style.alignItems = 'center';
+    
+    header.appendChild(titleSection);
+    header.appendChild(pointsSection);
+    header.appendChild(scoreSection);
+    header.appendChild(controlsSection);
+    header.appendChild(globalUpgradesSection);
+    
+    document.body.appendChild(header);
+    
+    createGlobalHardDropButton();
+    createUnlockNextBoardButton();
+    addTutorialControls();
+}
+
+function createGlobalHardDropButton(): void {
+    const globalUpgradesSection = document.getElementById('global-upgrades');
+    if (!globalUpgradesSection) return;
+    
+    const hardDropButton = document.createElement('button');
+    hardDropButton.id = 'global-harddrop-button';
+    hardDropButton.textContent = `Unlock Hard Drop (${BASE_COSTS.HARD_DROP} pt)`;
+    hardDropButton.style.display = 'none';
+    hardDropButton.style.padding = '10px 20px';
+    hardDropButton.style.fontSize = '14px';
+    hardDropButton.style.fontWeight = 'bold';
+    hardDropButton.style.backgroundColor = '#2196F3';
+    hardDropButton.style.color = 'white';
+    hardDropButton.style.border = 'none';
+    hardDropButton.style.borderRadius = '8px';
+    hardDropButton.style.cursor = 'pointer';
+    hardDropButton.style.transition = 'all 0.3s ease';
+    
+    hardDropButton.addEventListener('mouseenter', () => {
+        if (!hardDropButton.disabled) {
+            hardDropButton.style.backgroundColor = '#1976D2';
+            hardDropButton.style.transform = 'scale(1.05)';
+        }
+    });
+    
+    hardDropButton.addEventListener('mouseleave', () => {
+        hardDropButton.style.backgroundColor = hardDropButton.disabled ? '#888888' : '#2196F3';
+        hardDropButton.style.transform = 'scale(1)';
+    });
+    
+    hardDropButton.addEventListener('click', purchaseHardDrop);
+    
+    globalUpgradesSection.appendChild(hardDropButton);
+}
+
+function createUnlockNextBoardButton(): void {
+    const globalUpgradesSection = document.getElementById('global-upgrades');
+    if (!globalUpgradesSection) return;
+    
+    const unlockButton = document.createElement('button');
+    unlockButton.id = 'unlock-next-board-button';
+    unlockButton.style.display = 'none';
+    unlockButton.style.padding = '10px 20px';
+    unlockButton.style.fontSize = '14px';
+    unlockButton.style.fontWeight = 'bold';
+    unlockButton.style.backgroundColor = '#FF5722';
+    unlockButton.style.color = 'white';
+    unlockButton.style.border = 'none';
+    unlockButton.style.borderRadius = '8px';
+    unlockButton.style.cursor = 'pointer';
+    unlockButton.style.transition = 'all 0.3s ease';
+    
+    unlockButton.addEventListener('mouseenter', () => {
+        if (!unlockButton.disabled) {
+            unlockButton.style.backgroundColor = '#E64A19';
+            unlockButton.style.transform = 'scale(1.05)';
+        }
+    });
+    
+    unlockButton.addEventListener('mouseleave', () => {
+        unlockButton.style.backgroundColor = unlockButton.disabled ? '#888888' : '#FF5722';
+        unlockButton.style.transform = 'scale(1)';
+    });
+    
+    unlockButton.addEventListener('click', unlockNextBoard);
+    
+    globalUpgradesSection.appendChild(unlockButton);
+}
+
+function createUI(): void {
+    // Create game container
+    const gameArea = document.getElementById('game-area');
+    if (!gameArea) return;
+    
+    const gameContainer = document.createElement('div');
+    gameContainer.id = 'game-container';
+    gameContainer.style.display = 'flex';
+    gameContainer.style.gap = '20px';
+    gameContainer.style.alignItems = 'flex-start';
+    
+    // Create mini boards column (for slots)
+    const miniBoardsColumn = document.createElement('div');
+    miniBoardsColumn.id = 'mini-boards-column';
+    miniBoardsColumn.style.display = 'none';  // Hidden until we have mini boards
+    miniBoardsColumn.style.flexDirection = 'column';
+    miniBoardsColumn.style.gap = '10px';
+    
+    // Create 3 rows of 2 slots each
+    for (let row = 0; row < 3; row++) {
+        const slotRow = document.createElement('div');
+        slotRow.className = 'mini-board-row';
+        slotRow.style.display = 'flex';
+        slotRow.style.gap = '10px';
+        
+        for (let col = 0; col < 2; col++) {
+            const slotIndex = row * 2 + col;
+            const slot = document.createElement('div');
+            slot.id = `mini-board-slot-${slotIndex}`;
+            slot.className = 'mini-board-slot';
+            slot.style.width = `${BOARD_WIDTH_MINI + PADDING_MINI * 2}px`;
+            slot.style.height = `${BOARD_HEIGHT_MINI + PADDING_MINI * 2}px`;
+            slot.style.backgroundColor = 'rgba(50, 50, 50, 0.5)';
+            slot.style.borderRadius = '8px';
+            slot.style.position = 'relative';
+            slotRow.appendChild(slot);
+        }
+        
+        miniBoardsColumn.appendChild(slotRow);
+    }
+    
+    // Create active board container
+    const activeBoardContainer = document.createElement('div');
+    activeBoardContainer.id = 'active-board-container';
+    activeBoardContainer.style.display = 'flex';
+    activeBoardContainer.style.gap = '20px';
+    
+    // Board 1 container (starts as active)
+    const board1Container = document.createElement('div');
+    board1Container.id = 'board-0-container';
+    board1Container.style.display = 'flex';
+    board1Container.style.gap = '20px';
+    board1Container.style.position = 'relative';
+    
+    activeBoardContainer.appendChild(board1Container);
+    
+    gameContainer.appendChild(miniBoardsColumn);
+    gameContainer.appendChild(activeBoardContainer);
+    
+    gameArea.appendChild(gameContainer);
+    
+    // Move the main canvas to board 0 container
+    board1Container.insertBefore(canvas, board1Container.firstChild);
+    
+    // Create UI panel for active board
+    createBoardUI(0);
+}
+
+function createBoardUI(boardIndex: number): void {
+    const boardContainer = document.getElementById(`board-${boardIndex}-container`);
+    if (!boardContainer) return;
+    
+    const uiPanel = document.createElement('div');
+    uiPanel.id = `board-${boardIndex}-ui`;
+    uiPanel.style.width = '200px';
+    uiPanel.style.padding = '20px';
+    uiPanel.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+    uiPanel.style.borderRadius = '12px';
+    uiPanel.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.3)';
+    uiPanel.style.color = 'white';
+    uiPanel.style.fontFamily = 'Arial, sans-serif';
+    
+    // Next piece preview
+    const nextPieceSection = document.createElement('div');
+    nextPieceSection.id = `next-piece-section-${boardIndex}`;
+    nextPieceSection.style.marginBottom = '20px';
+    nextPieceSection.style.padding = '15px';
+    nextPieceSection.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+    nextPieceSection.style.borderRadius = '8px';
+    nextPieceSection.innerHTML = `
+        <div style="font-size: 14px; opacity: 0.7; margin-bottom: 10px; text-align: center;">Next Piece</div>
+    `;
+    
+    const nextPieceCanvas = document.createElement('canvas');
+    nextPieceCanvas.id = `next-piece-canvas-${boardIndex}`;
+    nextPieceCanvas.width = 100;
+    nextPieceCanvas.height = 80;
+    nextPieceCanvas.style.display = 'block';
+    nextPieceCanvas.style.margin = '0 auto';
+    nextPieceCanvas.style.border = '2px solid #333';
+    nextPieceCanvas.style.borderRadius = '4px';
+    nextPieceCanvas.style.backgroundColor = '#111';
+    nextPieceSection.appendChild(nextPieceCanvas);
+    
+    // Board status
+    const statusSection = document.createElement('div');
+    statusSection.id = `board-${boardIndex}-status`;
+    statusSection.style.marginBottom = '20px';
+    statusSection.style.padding = '10px';
+    statusSection.style.backgroundColor = 'rgba(76, 175, 80, 0.2)';
+    statusSection.style.borderRadius = '8px';
+    statusSection.style.textAlign = 'center';
+    statusSection.style.fontSize = '14px';
+    statusSection.innerHTML = '<span>🎮 Player Control</span>';
+    
+    // Upgrades section
+    const upgradesSection = document.createElement('div');
+    upgradesSection.id = `board-${boardIndex}-upgrades`;
+    upgradesSection.style.display = 'flex';
+    upgradesSection.style.flexDirection = 'column';
+    upgradesSection.style.gap = '10px';
+    
+    uiPanel.appendChild(nextPieceSection);
+    uiPanel.appendChild(statusSection);
+    uiPanel.appendChild(upgradesSection);
+    
+    boardContainer.appendChild(uiPanel);
+    
+    createBoardUpgradeButtons(boardIndex);
+}
+
+function createBoardUpgradeButtons(boardIndex: number): void {
+    const upgradesSection = document.getElementById(`board-${boardIndex}-upgrades`);
+    if (!upgradesSection) return;
+    
+    const board = boards[boardIndex];
+    if (!board) return;
+    
+    // Calculate costs for this board
+    const aiCost = getBoardCost(BASE_COSTS.HIRE_AI, boardIndex);
+    const hardDropCost = getBoardCost(BASE_COSTS.AI_HARD_DROP, boardIndex);
+    const speedCost = getBoardCost(BASE_COSTS.AI_SPEED, boardIndex);
+    
+    // Hire AI button
+    const aiButton = document.createElement('button');
+    aiButton.id = `ai-button-${boardIndex}`;
+    aiButton.textContent = `Hire AI (${aiCost} pts)`;
+    aiButton.style.display = 'none';
+    aiButton.style.width = '100%';
+    aiButton.style.padding = '10px';
+    aiButton.style.fontSize = '13px';
+    aiButton.style.fontWeight = 'bold';
+    aiButton.style.backgroundColor = '#4CAF50';
+    aiButton.style.color = 'white';
+    aiButton.style.border = 'none';
+    aiButton.style.borderRadius = '6px';
+    aiButton.style.cursor = 'pointer';
+    aiButton.style.transition = 'all 0.3s ease';
+    
+    aiButton.addEventListener('click', () => hireAI(boardIndex));
+    
+    // AI Hard Drop button
+    const aiHardDropButton = document.createElement('button');
+    aiHardDropButton.id = `ai-harddrop-button-${boardIndex}`;
+    aiHardDropButton.textContent = `AI Hard Drop (${hardDropCost} pts)`;
+    aiHardDropButton.style.display = 'none';
+    aiHardDropButton.style.width = '100%';
+    aiHardDropButton.style.padding = '10px';
+    aiHardDropButton.style.fontSize = '13px';
+    aiHardDropButton.style.fontWeight = 'bold';
+    aiHardDropButton.style.backgroundColor = '#FF9800';
+    aiHardDropButton.style.color = 'white';
+    aiHardDropButton.style.border = 'none';
+    aiHardDropButton.style.borderRadius = '6px';
+    aiHardDropButton.style.cursor = 'pointer';
+    aiHardDropButton.style.transition = 'all 0.3s ease';
+    
+    aiHardDropButton.addEventListener('click', () => purchaseAIHardDrop(boardIndex));
+    
+    // AI Speed button
+    const aiSpeedButton = document.createElement('button');
+    aiSpeedButton.id = `ai-speed-button-${boardIndex}`;
+    aiSpeedButton.textContent = `AI Speed Lv1 (${speedCost} pts)`;
+    aiSpeedButton.style.display = 'none';
+    aiSpeedButton.style.width = '100%';
+    aiSpeedButton.style.padding = '10px';
+    aiSpeedButton.style.fontSize = '13px';
+    aiSpeedButton.style.fontWeight = 'bold';
+    aiSpeedButton.style.backgroundColor = '#00BCD4';
+    aiSpeedButton.style.color = 'white';
+    aiSpeedButton.style.border = 'none';
+    aiSpeedButton.style.borderRadius = '6px';
+    aiSpeedButton.style.cursor = 'pointer';
+    aiSpeedButton.style.transition = 'all 0.3s ease';
+    
+    aiSpeedButton.addEventListener('click', () => purchaseAISpeedUpgrade(boardIndex));
+    
+    upgradesSection.appendChild(aiButton);
+    upgradesSection.appendChild(aiHardDropButton);
+    upgradesSection.appendChild(aiSpeedButton);
+}
+
+// =====================================================
+// PURCHASE FUNCTIONS
+// =====================================================
+
+function purchaseHardDrop(): void {
+    if (globalPoints < BASE_COSTS.HARD_DROP) return;
+    
+    globalPoints -= BASE_COSTS.HARD_DROP;
+    hardDropUnlocked = true;
+    
+    updatePointsDisplay();
+    updateGlobalHardDropButton();
+    updateControlsDisplay();
+    
+    console.log("Hard Drop unlocked!");
+}
+
+function hireAI(boardIndex: number): void {
+    const board = boards[boardIndex];
+    if (!board) return;
+    
+    const cost = getBoardCost(BASE_COSTS.HIRE_AI, boardIndex);
+    if (globalPoints < cost) return;
+    
+    globalPoints -= cost;
+    board.aiHired = true;
+    board.aiEnabled = true;
+    
+    updatePointsDisplay();
+    updateBoardButtons(boardIndex);
+    updateBoardStatus(boardIndex);
+    
+    console.log(`AI hired for board ${boardIndex + 1}!`);
+}
+
+function purchaseAIHardDrop(boardIndex: number): void {
+    const board = boards[boardIndex];
+    if (!board || !board.aiHired) return;
+    
+    const cost = getBoardCost(BASE_COSTS.AI_HARD_DROP, boardIndex);
+    if (globalPoints < cost) return;
+    
+    globalPoints -= cost;
+    board.aiHardDropUnlocked = true;
+    
+    updatePointsDisplay();
+    updateBoardButtons(boardIndex);
+    checkBoardMaxedOut(boardIndex);
+    
+    console.log(`AI Hard Drop unlocked for board ${boardIndex + 1}!`);
+}
+
+function purchaseAISpeedUpgrade(boardIndex: number): void {
+    const board = boards[boardIndex];
+    if (!board || !board.aiHired) return;
+    if (board.aiSpeedLevel >= MAX_AI_SPEED_UPGRADES) return;
+    
+    const cost = getBoardCost(BASE_COSTS.AI_SPEED, boardIndex);
+    if (globalPoints < cost) return;
+    
+    globalPoints -= cost;
+    board.aiSpeedLevel++;
+    board.aiSpeed = BASE_AI_SPEED / Math.pow(1.5, board.aiSpeedLevel);
+    
+    updatePointsDisplay();
+    updateBoardButtons(boardIndex);
+    checkBoardMaxedOut(boardIndex);
+    
+    console.log(`AI Speed upgraded to level ${board.aiSpeedLevel} for board ${boardIndex + 1}!`);
+}
+
+function checkBoardMaxedOut(boardIndex: number): void {
+    const board = boards[boardIndex];
+    if (!board) return;
+    
+    if (isBoardMaxedOut(board) && !board.isMaxedOut) {
+        board.isMaxedOut = true;
+        updateUnlockNextBoardButton();
+        console.log(`Board ${boardIndex + 1} is maxed out!`);
+    }
+}
+
+function unlockNextBoard(): void {
+    if (!canUnlockNextBoard()) return;
+    
+    const cost = getNextBoardUnlockCost(boards.length);
+    if (globalPoints < cost) return;
+    
+    globalPoints -= cost;
+    
+    // Minify the current active board
+    const currentActiveBoard = boards[activeBoardIndex];
+    minifyBoard(currentActiveBoard);
+    
+    // Create new board
+    const newBoardIndex = boards.length;
+    const newBoard = createBoard(newBoardIndex);
+    boards.push(newBoard);
+    
+    // Set up the new board
+    createNewBoardUI(newBoardIndex);
+    
+    // Update active board
+    activeBoardIndex = newBoardIndex;
+    newBoard.lastDropTime = performance.now();
+    spawnNewPiece(newBoard);
+    
+    updatePointsDisplay();
+    updateUnlockNextBoardButton();
+    
+    console.log(`Board ${newBoardIndex + 1} unlocked!`);
+}
+
+function minifyBoard(board: Board): void {
+    board.isMinified = true;
+    
+    // Make sure AI is enabled
+    if (!board.aiEnabled && board.aiHired) {
+        board.aiEnabled = true;
+    }
+    
+    // Find an empty slot
+    const slotIndex = board.index;
+    const slot = document.getElementById(`mini-board-slot-${slotIndex}`);
+    if (!slot) return;
+    
+    // Show the mini boards column
+    const miniBoardsColumn = document.getElementById('mini-boards-column');
+    if (miniBoardsColumn) {
+        miniBoardsColumn.style.display = 'flex';
+    }
+    
+    // Create mini canvas
+    const miniCanvas = document.createElement('canvas');
+    miniCanvas.id = `mini-canvas-${board.index}`;
+    miniCanvas.width = BOARD_WIDTH_MINI + PADDING_MINI * 2;
+    miniCanvas.height = BOARD_HEIGHT_MINI + PADDING_MINI * 2;
+    miniCanvas.style.borderRadius = '4px';
+    board.canvas = miniCanvas;
+    
+    // Clear slot and add canvas
+    slot.innerHTML = '';
+    slot.appendChild(miniCanvas);
+    slot.style.position = 'relative';
+    
+    // Remove the old board container from active area
+    const oldContainer = document.getElementById(`board-${board.index}-container`);
+    if (oldContainer) {
+        oldContainer.remove();
+    }
+    
+    // Store container reference
+    board.container = slot;
+    
+    updateBoardStatus(board.index);
+}
+
+function createNewBoardUI(boardIndex: number): void {
+    const activeBoardContainer = document.getElementById('active-board-container');
+    if (!activeBoardContainer) return;
+    
+    // Create container for new active board
+    const boardContainer = document.createElement('div');
+    boardContainer.id = `board-${boardIndex}-container`;
+    boardContainer.style.display = 'flex';
+    boardContainer.style.gap = '20px';
+    boardContainer.style.position = 'relative';
+    
+    // Create canvas for new board
+    const newCanvas = document.createElement('canvas');
+    newCanvas.id = `game-canvas-${boardIndex}`;
+    newCanvas.width = BOARD_WIDTH + (PADDING * 2);
+    newCanvas.height = BOARD_HEIGHT + (PADDING * 2);
+    newCanvas.style.backgroundColor = '#000000';
+    newCanvas.style.borderRadius = '12px';
+    newCanvas.style.boxShadow = '0 0 20px rgba(0, 0, 0, 0.3)';
+    
+    boardContainer.appendChild(newCanvas);
+    
+    // Set canvas reference
+    boards[boardIndex].canvas = newCanvas;
+    boards[boardIndex].container = boardContainer;
+    
+    // Clear active board container and add new board
+    activeBoardContainer.innerHTML = '';
+    activeBoardContainer.appendChild(boardContainer);
+    
+    // Create UI for new board
+    createBoardUI(boardIndex);
+}
+
+// =====================================================
+// UPDATE FUNCTIONS
+// =====================================================
+
+function updatePointsDisplay(): void {
+    const pointsDisplay = document.getElementById('global-points-value');
+    const scoreDisplay = document.getElementById('global-score-value');
+    
+    if (pointsDisplay) pointsDisplay.textContent = globalPoints.toString();
+    if (scoreDisplay) scoreDisplay.textContent = globalLinesCleared.toString();
+    
+    // Update all button states
+    updateGlobalHardDropButton();
+    updateUnlockNextBoardButton();
+    
+    for (let i = 0; i < boards.length; i++) {
+        if (!boards[i].isMinified) {
+            updateBoardButtons(i);
+        }
+        updateBoardLostOverlay(i);
+    }
+}
+
+function updateGlobalHardDropButton(): void {
+    const button = document.getElementById('global-harddrop-button') as HTMLButtonElement;
+    if (!button) return;
+    
+    if (hardDropUnlocked) {
+        button.textContent = 'Hard Drop ✓';
+        button.style.display = 'block';
+        button.style.backgroundColor = '#888888';
+        button.style.cursor = 'default';
+        button.disabled = true;
+    } else if (globalPoints >= BASE_COSTS.HARD_DROP) {
+        button.style.display = 'block';
+        button.style.backgroundColor = '#2196F3';
+        button.style.cursor = 'pointer';
+        button.disabled = false;
+    } else {
+        button.style.display = 'none';
+    }
+}
+
+function updateUnlockNextBoardButton(): void {
+    const button = document.getElementById('unlock-next-board-button') as HTMLButtonElement;
+    if (!button) return;
+    
+    if (!canUnlockNextBoard()) {
+        button.style.display = 'none';
+        return;
+    }
+    
+    const cost = getNextBoardUnlockCost(boards.length);
+    const nextBoardNum = boards.length + 1;
+    
+    if (globalPoints >= cost) {
+        button.style.display = 'block';
+        button.style.backgroundColor = '#FF5722';
+        button.style.cursor = 'pointer';
+        button.disabled = false;
+        button.textContent = `Unlock Board ${nextBoardNum} (${cost} pts)`;
+    } else {
+        button.style.display = 'block';
+        button.style.backgroundColor = '#888888';
+        button.style.cursor = 'not-allowed';
+        button.disabled = true;
+        button.textContent = `Unlock Board ${nextBoardNum} (need ${cost} pts)`;
+    }
+}
+
+function updateBoardButtons(boardIndex: number): void {
+    const board = boards[boardIndex];
+    if (!board) return;
+    
+    const aiCost = getBoardCost(BASE_COSTS.HIRE_AI, boardIndex);
+    const hardDropCost = getBoardCost(BASE_COSTS.AI_HARD_DROP, boardIndex);
+    const speedCost = getBoardCost(BASE_COSTS.AI_SPEED, boardIndex);
+    
+    // AI Button
+    const aiButton = document.getElementById(`ai-button-${boardIndex}`) as HTMLButtonElement;
+    if (aiButton) {
+        if (board.aiHired) {
+            aiButton.textContent = '🤖 AI Active';
+            aiButton.style.display = 'block';
+            aiButton.style.backgroundColor = '#888888';
+            aiButton.style.cursor = 'default';
+            aiButton.disabled = true;
+        } else if (globalPoints >= aiCost) {
+            aiButton.style.display = 'block';
+            aiButton.style.backgroundColor = '#4CAF50';
+            aiButton.style.cursor = 'pointer';
+            aiButton.disabled = false;
+            aiButton.textContent = `Hire AI (${aiCost} pts)`;
+        } else {
+            aiButton.style.display = 'none';
+        }
+    }
+    
+    // AI Hard Drop Button
+    const hardDropButton = document.getElementById(`ai-harddrop-button-${boardIndex}`) as HTMLButtonElement;
+    if (hardDropButton) {
+        if (!board.aiHired) {
+            hardDropButton.style.display = 'none';
+        } else if (board.aiHardDropUnlocked) {
+            hardDropButton.textContent = 'AI Hard Drop ✓';
+            hardDropButton.style.display = 'block';
+            hardDropButton.style.backgroundColor = '#888888';
+            hardDropButton.style.cursor = 'default';
+            hardDropButton.disabled = true;
+        } else if (globalPoints >= hardDropCost) {
+            hardDropButton.style.display = 'block';
+            hardDropButton.style.backgroundColor = '#FF9800';
+            hardDropButton.style.cursor = 'pointer';
+            hardDropButton.disabled = false;
+            hardDropButton.textContent = `AI Hard Drop (${hardDropCost} pts)`;
+        } else {
+            hardDropButton.style.display = 'none';
+        }
+    }
+    
+    // AI Speed Button
+    const speedButton = document.getElementById(`ai-speed-button-${boardIndex}`) as HTMLButtonElement;
+    if (speedButton) {
+        if (!board.aiHired) {
+            speedButton.style.display = 'none';
+        } else if (board.aiSpeedLevel >= MAX_AI_SPEED_UPGRADES) {
+            speedButton.textContent = 'AI Speed MAX ✓';
+            speedButton.style.display = 'block';
+            speedButton.style.backgroundColor = '#888888';
+            speedButton.style.cursor = 'default';
+            speedButton.disabled = true;
+        } else if (globalPoints >= speedCost) {
+            speedButton.style.display = 'block';
+            speedButton.style.backgroundColor = '#00BCD4';
+            speedButton.style.cursor = 'pointer';
+            speedButton.disabled = false;
+            speedButton.textContent = `AI Speed Lv${board.aiSpeedLevel + 1} (${speedCost} pts)`;
+        } else {
+            speedButton.style.display = 'none';
+        }
+    }
+}
+
+function updateBoardStatus(boardIndex: number): void {
+    const statusSection = document.getElementById(`board-${boardIndex}-status`);
+    if (!statusSection) return;
+    
+    const board = boards[boardIndex];
+    if (!board) return;
+    
+    if (board.aiEnabled) {
+        statusSection.style.backgroundColor = 'rgba(255, 152, 0, 0.2)';
+        statusSection.innerHTML = '<span>🤖 AI Control</span>';
+    } else {
+        statusSection.style.backgroundColor = 'rgba(76, 175, 80, 0.2)';
+        statusSection.innerHTML = '<span>🎮 Player Control</span>';
+    }
+}
+
+function updateControlsDisplay(): void {
+    const spaceControlText = document.getElementById('space-control-text');
+    if (!spaceControlText) return;
+    
+    if (hardDropUnlocked) {
+        spaceControlText.style.opacity = '1';
+        spaceControlText.style.color = '#4CAF50';
+        spaceControlText.innerHTML = 'Space : Hard Drop ✓';
+    } else {
+        spaceControlText.style.opacity = '0.5';
+        spaceControlText.style.color = '#aaa';
+        spaceControlText.innerHTML = 'Space : Locked';
+    }
+}
+
+function updateNextPiecePreview(board: Board): void {
+    const previewCanvas = document.getElementById(`next-piece-canvas-${board.index}`) as HTMLCanvasElement;
+    if (!previewCanvas || !board.nextPiece) return;
+    
+    const previewCtx = previewCanvas.getContext('2d');
+    if (!previewCtx) return;
+    
+    previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+    previewCtx.fillStyle = '#000000';
+    previewCtx.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
+    
+    const shape = PIECES[board.nextPiece];
+    const color = PIECE_COLORS[board.nextPiece];
+    
+    const blockSize = 20;
+    const shapeWidth = shape[0].length;
+    const shapeHeight = shape.length;
+    
+    const offsetX = (previewCanvas.width - (shapeWidth * blockSize)) / 2;
+    const offsetY = (previewCanvas.height - (shapeHeight * blockSize)) / 2;
+    
+    for (let row = 0; row < shape.length; row++) {
+        for (let col = 0; col < shape[row].length; col++) {
+            if (shape[row][col]) {
+                const x = offsetX + (col * blockSize);
+                const y = offsetY + (row * blockSize);
+                
+                previewCtx.fillStyle = color;
+                previewCtx.fillRect(x, y, blockSize, blockSize);
+                
+                previewCtx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+                previewCtx.lineWidth = 1;
+                previewCtx.beginPath();
+                previewCtx.moveTo(x, y + blockSize);
+                previewCtx.lineTo(x, y);
+                previewCtx.lineTo(x + blockSize, y);
+                previewCtx.stroke();
+                
+                previewCtx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+                previewCtx.beginPath();
+                previewCtx.moveTo(x + blockSize, y);
+                previewCtx.lineTo(x + blockSize, y + blockSize);
+                previewCtx.lineTo(x, y + blockSize);
+                previewCtx.stroke();
+            }
+        }
+    }
+}
+
+// =====================================================
+// GAME OVER FUNCTIONS
+// =====================================================
+
+function createGameOverScreen(): void {
+    const overlay = document.createElement('div');
+    overlay.id = 'game-over-overlay';
+    overlay.style.position = 'fixed';
+    overlay.style.top = '0';
+    overlay.style.left = '0';
+    overlay.style.width = '100%';
+    overlay.style.height = '100%';
+    overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
+    overlay.style.display = 'none';
+    overlay.style.justifyContent = 'center';
+    overlay.style.alignItems = 'center';
+    overlay.style.zIndex = '9999';
+    overlay.style.opacity = '0';
+    overlay.style.transition = 'opacity 0.5s ease';
+    
+    const panel = document.createElement('div');
+    panel.style.backgroundColor = '#1a1a1a';
+    panel.style.padding = '50px';
+    panel.style.borderRadius = '20px';
+    panel.style.boxShadow = '0 10px 40px rgba(0,0,0,0.5)';
+    panel.style.textAlign = 'center';
+    panel.style.maxWidth = '500px';
+    panel.style.border = '3px solid #ff4444';
+    
+    const title = document.createElement('h1');
+    title.textContent = 'GAME OVER';
+    title.style.color = '#ff4444';
+    title.style.fontSize = '48px';
+    title.style.margin = '0 0 30px 0';
+    title.style.fontFamily = 'Arial, sans-serif';
+    title.style.textShadow = '2px 2px 8px rgba(255,68,68,0.5)';
+    
+    const stats = document.createElement('div');
+    stats.id = 'game-over-stats';
+    stats.style.color = 'white';
+    stats.style.fontSize = '20px';
+    stats.style.marginBottom = '40px';
+    stats.style.lineHeight = '1.8';
+    stats.innerHTML = `
+        <div style="margin-bottom: 15px;">
+            <span style="opacity: 0.7;">Final Score:</span>
+            <span style="font-size: 32px; font-weight: bold; color: #4CAF50; margin-left: 10px;" id="final-score">0</span>
+        </div>
+    `;
+    
+    const resetButton = document.createElement('button');
+    resetButton.textContent = 'PLAY AGAIN';
+    resetButton.style.padding = '15px 50px';
+    resetButton.style.fontSize = '20px';
+    resetButton.style.fontWeight = 'bold';
+    resetButton.style.backgroundColor = '#4CAF50';
+    resetButton.style.color = 'white';
+    resetButton.style.border = 'none';
+    resetButton.style.borderRadius = '10px';
+    resetButton.style.cursor = 'pointer';
+    resetButton.style.boxShadow = '0 4px 6px rgba(0,0,0,0.3)';
+    resetButton.style.transition = 'all 0.3s ease';
+    
+    resetButton.addEventListener('mouseenter', () => {
+        resetButton.style.backgroundColor = '#45a049';
+        resetButton.style.transform = 'scale(1.05)';
+    });
+    
+    resetButton.addEventListener('mouseleave', () => {
+        resetButton.style.backgroundColor = '#4CAF50';
+        resetButton.style.transform = 'scale(1)';
+    });
+    
+    resetButton.addEventListener('click', resetGame);
+    
+    panel.appendChild(title);
+    panel.appendChild(stats);
+    panel.appendChild(resetButton);
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+}
+
+function showGameOverScreen(): void {
+    const overlay = document.getElementById('game-over-overlay');
+    if (!overlay) return;
+    
+    const finalScore = document.getElementById('final-score');
+    if (finalScore) finalScore.textContent = globalLinesCleared.toString();
+    
+    overlay.style.display = 'flex';
+    setTimeout(() => { overlay.style.opacity = '1'; }, 10);
+}
+
+function hideGameOverScreen(): void {
+    const overlay = document.getElementById('game-over-overlay');
+    if (!overlay) return;
+    
+    overlay.style.opacity = '0';
+    setTimeout(() => { overlay.style.display = 'none'; }, 500);
+}
+
+function showBoardLostOverlay(board: Board): void {
+    if (!board.isMinified || !board.container) return;
+    
+    // Check if overlay already exists
+    const existingOverlay = document.getElementById(`board-lost-overlay-${board.index}`);
+    if (existingOverlay) return;
+    
+    const overlay = document.createElement('div');
+    overlay.id = `board-lost-overlay-${board.index}`;
+    overlay.style.position = 'absolute';
+    overlay.style.top = '0';
+    overlay.style.left = '0';
+    overlay.style.width = '100%';
+    overlay.style.height = '100%';
+    overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
+    overlay.style.display = 'flex';
+    overlay.style.flexDirection = 'column';
+    overlay.style.justifyContent = 'center';
+    overlay.style.alignItems = 'center';
+    overlay.style.borderRadius = '8px';
+    overlay.style.zIndex = '100';
+    
+    const resetCost = getResetCost(board.index);
+    
+    const resetButton = document.createElement('button');
+    resetButton.id = `reset-board-button-${board.index}`;
+    resetButton.textContent = `Reset (${resetCost})`;
+    resetButton.style.padding = '8px 16px';
+    resetButton.style.fontSize = '11px';
+    resetButton.style.fontWeight = 'bold';
+    resetButton.style.backgroundColor = globalPoints >= resetCost ? '#4CAF50' : '#888888';
+    resetButton.style.color = 'white';
+    resetButton.style.border = 'none';
+    resetButton.style.borderRadius = '6px';
+    resetButton.style.cursor = globalPoints >= resetCost ? 'pointer' : 'not-allowed';
+    resetButton.disabled = globalPoints < resetCost;
+    
+    resetButton.addEventListener('click', () => {
+        if (globalPoints >= resetCost) {
+            resetBoard(board.index);
+        }
+    });
+    
+    overlay.appendChild(resetButton);
+    board.container.appendChild(overlay);
+}
+
+function updateBoardLostOverlay(boardIndex: number): void {
+    const board = boards[boardIndex];
+    if (!board || !board.isGameOver) return;
+    
+    const resetButton = document.getElementById(`reset-board-button-${boardIndex}`) as HTMLButtonElement;
+    if (!resetButton) return;
+    
+    const resetCost = getResetCost(boardIndex);
+    const canAfford = globalPoints >= resetCost;
+    
+    resetButton.disabled = !canAfford;
+    resetButton.style.backgroundColor = canAfford ? '#4CAF50' : '#888888';
+    resetButton.style.cursor = canAfford ? 'pointer' : 'not-allowed';
+}
+
+function resetBoard(boardIndex: number): void {
+    const board = boards[boardIndex];
+    if (!board) return;
+    
+    const resetCost = getResetCost(boardIndex);
+    if (globalPoints < resetCost) return;
+    
+    globalPoints -= resetCost;
+    
+    // Remove overlay
+    const overlay = document.getElementById(`board-lost-overlay-${boardIndex}`);
+    if (overlay) overlay.remove();
+    
+    // Reset board state
+    board.grid = createEmptyGrid();
+    board.currentPiece = null;
+    board.nextPiece = null;
+    board.isGameOver = false;
+    board.lastDropTime = performance.now();
+    
+    // Keep AI settings (board stays maxed out)
+    board.aiEnabled = true;
+    board.aiTargetPosition = null;
+    board.aiMoving = false;
+    
+    spawnNewPiece(board);
+    updatePointsDisplay();
+    
+    console.log(`Board ${boardIndex + 1} reset!`);
+}
+
+function resetGame(): void {
+    hideGameOverScreen();
+    
+    // Reset global state
+    isGameOver = false;
+    globalPoints = 0;
+    globalLinesCleared = 0;
+    hardDropUnlocked = false;
+    forceNextPieceUnlocked = false;
+    
+    // Clear all boards except first
+    while (boards.length > 1) {
+        const board = boards.pop()!;
+        if (board.container) {
+            board.container.remove();
+        }
+    }
+    
+    // Hide mini boards column
+    const miniBoardsColumn = document.getElementById('mini-boards-column');
+    if (miniBoardsColumn) {
+        miniBoardsColumn.style.display = 'none';
+        // Clear all slots
+        for (let i = 0; i < 6; i++) {
+            const slot = document.getElementById(`mini-board-slot-${i}`);
+            if (slot) {
+                slot.innerHTML = '';
+                slot.style.backgroundColor = 'rgba(50, 50, 50, 0.5)';
+            }
+        }
+    }
+    
+    // Reset first board
+    const board0 = boards[0];
+    board0.grid = createEmptyGrid();
+    board0.currentPiece = null;
+    board0.nextPiece = null;
+    board0.isGameOver = false;
+    board0.lastDropTime = performance.now();
+    board0.aiHired = false;
+    board0.aiEnabled = false;
+    board0.aiHardDropUnlocked = false;
+    board0.aiSpeedLevel = 0;
+    board0.aiSpeed = BASE_AI_SPEED;
+    board0.aiTargetPosition = null;
+    board0.aiMoving = false;
+    board0.isMaxedOut = false;
+    board0.isMinified = false;
+    board0.canvas = canvas;
+    
+    // Recreate board 0 UI if needed
+    const activeBoardContainer = document.getElementById('active-board-container');
+    if (activeBoardContainer) {
+        activeBoardContainer.innerHTML = '';
+        
+        const board0Container = document.createElement('div');
+        board0Container.id = 'board-0-container';
+        board0Container.style.display = 'flex';
+        board0Container.style.gap = '20px';
+        board0Container.style.position = 'relative';
+        
+        board0Container.appendChild(canvas);
+        activeBoardContainer.appendChild(board0Container);
+        
+        createBoardUI(0);
+    }
+    
+    activeBoardIndex = 0;
+    
+    spawnNewPiece(board0);
+    updatePointsDisplay();
+    updateControlsDisplay();
+    updateBoardStatus(0);
+    
+    console.log("Game reset!");
+}
+
+// =====================================================
+// DIALOGUE SYSTEM
+// =====================================================
+
 function createDialogueSystem(): void {
-    // Create the overlay that dims the background
     const overlay = document.createElement('div');
     overlay.id = 'dialogue-overlay';
     overlay.style.position = 'fixed';
@@ -325,11 +1949,10 @@ function createDialogueSystem(): void {
     overlay.style.width = '100%';
     overlay.style.height = '100%';
     overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-    overlay.style.display = 'none';  // Hidden initially
+    overlay.style.display = 'none';
     overlay.style.zIndex = '2000';
-    overlay.style.cursor = 'pointer';  // Show it's clickable
+    overlay.style.cursor = 'pointer';
     
-    // Create the dialogue box container
     const dialogueBox = document.createElement('div');
     dialogueBox.id = 'dialogue-box';
     dialogueBox.style.position = 'absolute';
@@ -340,31 +1963,15 @@ function createDialogueSystem(): void {
     dialogueBox.style.minWidth = '300px';
     dialogueBox.style.maxWidth = '400px';
     dialogueBox.style.boxShadow = '0 4px 20px rgba(0, 0, 0, 0.8)';
-    dialogueBox.style.display = 'none';  // Hidden initially
+    dialogueBox.style.display = 'none';
     dialogueBox.style.zIndex = '2001';
     
-    // Create the arrow that points to the upgrade button
-    const arrow = document.createElement('div');
-    arrow.id = 'dialogue-arrow';
-    arrow.style.position = 'absolute';
-    arrow.style.width = '0';
-    arrow.style.height = '0';
-    arrow.style.borderTop = '10px solid transparent';
-    arrow.style.borderBottom = '10px solid transparent';
-    arrow.style.borderLeft = '15px solid #4CAF50';  // Arrow pointing right
-    arrow.style.right = '-15px';  // Position on right side of box
-    arrow.style.top = '50%';
-    arrow.style.transform = 'translateY(-50%)';
-    
-    // Create the title element
     const title = document.createElement('h3');
     title.id = 'dialogue-title';
     title.style.margin = '0 0 12px 0';
     title.style.color = '#4CAF50';
     title.style.fontSize = '18px';
-    title.style.fontWeight = 'bold';
     
-    // Create the description element
     const description = document.createElement('p');
     description.id = 'dialogue-description';
     description.style.margin = '0 0 15px 0';
@@ -372,5259 +1979,225 @@ function createDialogueSystem(): void {
     description.style.fontSize = '14px';
     description.style.lineHeight = '1.5';
     
-    // Create the "Click anywhere to continue" hint
     const hint = document.createElement('div');
     hint.style.fontSize = '12px';
     hint.style.color = '#888';
     hint.style.fontStyle = 'italic';
     hint.style.textAlign = 'center';
-    hint.style.marginTop = '10px';
     hint.textContent = 'Click anywhere to continue';
     
-    // Assemble the dialogue box
-    dialogueBox.appendChild(arrow);
     dialogueBox.appendChild(title);
     dialogueBox.appendChild(description);
     dialogueBox.appendChild(hint);
     
-    // Add click handler to close dialogue
     overlay.addEventListener('click', closeCurrentDialogue);
-
-    // Add shake animation for disabled piece icons
-    if (!document.getElementById('shake-animation')) {
-        const shakeStyle = document.createElement('style');
-        shakeStyle.id = 'shake-animation';
-        shakeStyle.textContent = `
-            @keyframes shake {
-                0%, 100% { transform: translateX(0); }
-                25% { transform: translateX(-4px); }
-                75% { transform: translateX(4px); }
-            }
-        `;
-        document.head.appendChild(shakeStyle);
-    }
-
-    // Add elements to the page
+    
     document.body.appendChild(overlay);
     document.body.appendChild(dialogueBox);
 }
 
-/**
- * Shows a dialogue box for an upgrade
- * @param dialogueId - The ID of the dialogue to show (e.g., 'global-harddrop')
- * @param targetElement - The HTML element to point the dialogue at
- */
 function showDialogue(dialogueId: string, targetElement: HTMLElement | null): void {
-    // Always track that this feature was unlocked (for the help button review)
     shownDialogues.add(dialogueId);
     
-    // Don't display if tutorials are disabled
     if (!tutorialsEnabled) return;
-    
-    // Don't display if already shown on screen this session
     if (displayedDialogues.has(dialogueId)) return;
     
-    // Get the dialogue content
     const content = DIALOGUE_CONTENT[dialogueId];
-    if (!content) {
-        console.warn(`No dialogue content found for: ${dialogueId}`);
-        return;
-    }
+    if (!content) return;
     
-    // If we're already showing a dialogue, queue this one (but don't mark as displayed yet)
     if (currentDialogue) {
         dialogueQueue.push(dialogueId);
         return;
     }
     
-    // Mark as displayed only when actually showing it
     displayedDialogues.add(dialogueId);
     
-    // Get elements FIRST before pausing
     const overlay = document.getElementById('dialogue-overlay');
     const box = document.getElementById('dialogue-box');
-    const title = document.getElementById('dialogue-title');
-    const description = document.getElementById('dialogue-description');
+    const titleEl = document.getElementById('dialogue-title');
+    const descEl = document.getElementById('dialogue-description');
     
-    // Only pause if we can actually show the dialogue
-    if (!overlay || !box || !title || !description) return;
+    if (!overlay || !box || !titleEl || !descEl) return;
     
-    // Pause the game (moved AFTER element check)
     isPaused = true;
     currentDialogue = dialogueId;
-
-    // pause page scrolling
-    document.body.classList.add("noscroll");
+    document.body.classList.add('noscroll');
     
-    // Set the content
-    title.textContent = content.title;
-    description.textContent = content.description;
+    titleEl.textContent = content.title;
+    descEl.textContent = content.description;
     
-    // Show the overlay
     overlay.style.display = 'block';
     
-    // Position the dialogue box
     if (targetElement) {
         const rect = targetElement.getBoundingClientRect();
         box.style.display = 'block';
+        box.style.left = (rect.left - 420) + 'px';
+        box.style.top = (rect.top + rect.height / 2 - 50) + 'px';
         
-        // Position to the left of the target element
-        box.style.left = (rect.left - 420) + 'px';  // 400px width + 20px gap
-        box.style.top = (rect.top + rect.height / 2 - 50) + 'px';  // Center vertically
-        
-        // Make sure it doesn't go off screen
         const boxRect = box.getBoundingClientRect();
-        if (boxRect.left < 20) {
-            box.style.left = '20px';
-        }
-        if (boxRect.top < 140) {  // Below header
-            box.style.top = '140px';
-        }
+        if (boxRect.left < 20) box.style.left = '20px';
+        if (boxRect.top < 140) box.style.top = '140px';
     } else {
-        // Center the dialogue if no target element
         box.style.display = 'block';
         box.style.left = '50%';
         box.style.top = '50%';
         box.style.transform = 'translate(-50%, -50%)';
-        
-        // Hide the arrow if centered
-        const arrow = document.getElementById('dialogue-arrow');
-        if (arrow) arrow.style.display = 'none';
     }
 }
 
-/**
- * Closes the current dialogue and shows the next one in queue if any
- */
 function closeCurrentDialogue(): void {
     const overlay = document.getElementById('dialogue-overlay');
     const box = document.getElementById('dialogue-box');
-    const arrow = document.getElementById('dialogue-arrow');
     
     if (!overlay || !box) return;
     
-    // Hide the dialogue
     overlay.style.display = 'none';
     box.style.display = 'none';
-    box.style.transform = '';  // Reset transform
-    if (arrow) arrow.style.display = 'block';  // Reset arrow
+    box.style.transform = '';
     
     currentDialogue = null;
     
-    // Check if there are more dialogues in queue
     if (dialogueQueue.length > 0) {
         const nextId = dialogueQueue.shift()!;
-        // Find the target element for the next dialogue
-        let target: HTMLElement | null = null;
-        if (nextId.includes('global')) {
-            target = document.getElementById('global-harddrop-button');
-        } else if (nextId.includes('-1')) {
-            const type = nextId.split('-')[0];
-            target = document.getElementById(`${type}-button-1`);
-        } else if (nextId.includes('-2')) {
-            const type = nextId.split('-')[0];
-            target = document.getElementById(`${type}-button-2`);
-        }
-        
-        // Show next dialogue after a small delay
-        setTimeout(() => showDialogue(nextId, target), 100);
+        setTimeout(() => showDialogue(nextId, null), 100);
     } else {
-        // Resume the game
         isPaused = false;
-
-        // resume page scrolling
-        document.body.classList.remove("noscroll");
+        document.body.classList.remove('noscroll');
     }
 }
 
-/**
- * Adds the tutorial settings to the global header
- * This includes the checkbox to disable tutorials and help button
- */
 function addTutorialControls(): void {
     const controlsSection = document.getElementById('global-controls-section');
     if (!controlsSection) return;
     
-    // Create a container for tutorial controls
     const tutorialControls = document.createElement('div');
     tutorialControls.style.marginTop = '10px';
     tutorialControls.style.display = 'flex';
-    tutorialControls.style.gap = '15px';
-    tutorialControls.style.justifyContent = 'center';
     tutorialControls.style.alignItems = 'center';
-    
-    // Create the checkbox to toggle tutorials
-    const checkboxLabel = document.createElement('label');
-    checkboxLabel.style.display = 'flex';
-    checkboxLabel.style.alignItems = 'center';
-    checkboxLabel.style.gap = '5px';
-    checkboxLabel.style.cursor = 'pointer';
-    checkboxLabel.style.fontSize = '12px';
-    checkboxLabel.style.color = '#aaa';
+    tutorialControls.style.justifyContent = 'center';
+    tutorialControls.style.gap = '10px';
     
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
-    checkbox.id = 'tutorial-checkbox';
-    checkbox.checked = true;  // Tutorials on by default
+    checkbox.id = 'tutorial-toggle';
+    checkbox.checked = tutorialsEnabled;
     checkbox.style.cursor = 'pointer';
     
-    checkbox.addEventListener('change', (e) => {
-        tutorialsEnabled = (e.target as HTMLInputElement).checked;
+    const label = document.createElement('label');
+    label.htmlFor = 'tutorial-toggle';
+    label.textContent = 'Show Tutorials';
+    label.style.fontSize = '11px';
+    label.style.cursor = 'pointer';
+    
+    checkbox.addEventListener('change', () => {
+        tutorialsEnabled = checkbox.checked;
     });
     
-    checkboxLabel.appendChild(checkbox);
-    checkboxLabel.appendChild(document.createTextNode('Show Tutorials'));
-    
-    // Create the help button to review seen tutorials
-    const helpButton = document.createElement('button');
-    helpButton.innerHTML = '❓';
-    helpButton.title = 'Review Tutorials';
-    helpButton.style.width = '28px';
-    helpButton.style.height = '28px';
-    helpButton.style.borderRadius = '50%';
-    helpButton.style.border = '1px solid #4CAF50';
-    helpButton.style.backgroundColor = 'transparent';
-    helpButton.style.color = '#4CAF50';
-    helpButton.style.cursor = 'pointer';
-    helpButton.style.fontSize = '14px';
-    helpButton.style.transition = 'all 0.3s ease';
-    
-    helpButton.addEventListener('mouseenter', () => {
-        helpButton.style.backgroundColor = 'rgba(76, 175, 80, 0.2)';
-    });
-    
-    helpButton.addEventListener('mouseleave', () => {
-        helpButton.style.backgroundColor = 'transparent';
-    });
-    
-    helpButton.addEventListener('click', showTutorialReview);
-    
-    // Add controls to the container
-    tutorialControls.appendChild(checkboxLabel);
-    tutorialControls.appendChild(helpButton);
-    
-    // Add to the controls section
+    tutorialControls.appendChild(checkbox);
+    tutorialControls.appendChild(label);
     controlsSection.appendChild(tutorialControls);
 }
 
-/**
- * Shows a review of all previously seen tutorials
- */
-function showTutorialReview(): void {
-    if (shownDialogues.size === 0) {
-        alert('No tutorials to review yet! Tutorials will appear as you unlock new features.');
-        return;
-    }
-    
-    // Pause the game
-    isPaused = true;
-
-    // pause page scrolling
-    document.body.classList.add("noscroll");
-
-    
-    // Create a simple modal to show all seen tutorials
-    const modal = document.createElement('div');
-    modal.style.position = 'fixed';
-    modal.style.top = '50%';
-    modal.style.left = '50%';
-    modal.style.transform = 'translate(-50%, -50%)';
-    modal.style.backgroundColor = '#1a1a1a';
-    modal.style.border = '2px solid #4CAF50';
-    modal.style.borderRadius = '12px';
-    modal.style.padding = '20px';
-    modal.style.maxWidth = '500px';
-    modal.style.maxHeight = '70vh';
-    modal.style.overflowY = 'auto';
-    modal.style.zIndex = '2002';
-    
-    const title = document.createElement('h2');
-    title.textContent = 'Tutorial Review';
-    title.style.color = '#4CAF50';
-    title.style.marginBottom = '15px';
-    modal.appendChild(title);
-    
-    // Add each seen tutorial
-    shownDialogues.forEach(dialogueId => {
-        const content = DIALOGUE_CONTENT[dialogueId];
-        if (content) {
-            const section = document.createElement('div');
-            section.style.marginBottom = '15px';
-            section.style.paddingBottom = '15px';
-            section.style.borderBottom = '1px solid #333';
-            
-            const sectionTitle = document.createElement('h4');
-            sectionTitle.textContent = content.title;
-            sectionTitle.style.color = '#4CAF50';
-            sectionTitle.style.marginBottom = '5px';
-            
-            const sectionDesc = document.createElement('p');
-            sectionDesc.textContent = content.description;
-            sectionDesc.style.color = '#aaa';
-            sectionDesc.style.fontSize = '13px';
-            
-            section.appendChild(sectionTitle);
-            section.appendChild(sectionDesc);
-            modal.appendChild(section);
-        }
-    });
-    
-    // Add close button
-    const closeBtn = document.createElement('button');
-    closeBtn.textContent = 'Close';
-    closeBtn.style.marginTop = '15px';
-    closeBtn.style.padding = '8px 20px';
-    closeBtn.style.backgroundColor = '#4CAF50';
-    closeBtn.style.color = 'white';
-    closeBtn.style.border = 'none';
-    closeBtn.style.borderRadius = '6px';
-    closeBtn.style.cursor = 'pointer';
-    closeBtn.onclick = () => {
-        document.body.removeChild(modal);
-        document.body.removeChild(overlay);
-        isPaused = false;
-        document.body.classList.remove("noscroll");
-    };
-    modal.appendChild(closeBtn);
-    
-    // Add overlay
-    const overlay = document.createElement('div');
-    overlay.style.position = 'fixed';
-    overlay.style.top = '0';
-    overlay.style.left = '0';
-    overlay.style.width = '100%';
-    overlay.style.height = '100%';
-    overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-    overlay.style.zIndex = '2001';
-    overlay.onclick = () => {
-        document.body.removeChild(modal);
-        document.body.removeChild(overlay);
-        isPaused = false;
-        document.body.classList.remove("noscroll");
-    };
-    
-    document.body.appendChild(overlay);
-    document.body.appendChild(modal);
-}
-
-// ===============================================
-// MODIFICATIONS TO EXISTING FUNCTIONS
-// ===============================================
-
-// MODIFY your createGlobalHeader() function to include the tutorial controls
-// Add this line at the end of createGlobalHeader(), after createUnlockSecondBoardButton():
-// addTutorialControls();
-
-// MODIFY your initialization code (around line 2800-2850)
-// Add these lines after createGlobalHeader() is called:
-// createDialogueSystem();
-// addTutorialControls();
-
-// MODIFY your purchaseHardDrop() function to show the dialogue
-// Add this after the purchase is successful (after hardDropUnlocked = true):
-// const button = document.getElementById('global-harddrop-button');
-// showDialogue('global-harddrop', button);
-
-// MODIFY your hireAIPlayer() function to show the dialogue
-// Add this after the AI is hired (after aiEnabled = true):
-// const button = document.getElementById('ai-button-1');
-// showDialogue('hire-ai-1', button);
-
-// MODIFY your purchaseAIHardDrop() function
-// Add this after the purchase (after aiHardDropEnabled = true):
-// const button = document.getElementById('ai-harddrop-button-1');
-// showDialogue('ai-harddrop-1', button);
-
-// MODIFY your purchaseAISpeedUpgrade() function
-// Add this after the upgrade (after aiSpeedLevel++):
-// const button = document.getElementById('ai-speed-button-1');
-// showDialogue('ai-speed-1', button);
-
-    // UI ELEMENTS CREATION - Create the points display and AI button
-
-    /**
-     * Creates the global header that sits at the top of the screen
-     * This contains the game title, global points, and global controls
-     */
-    function createGlobalHeader(): void {
-        // Create the header container
-        const header = document.createElement('div');
-        header.id = 'global-header';
-        
-        // Style the header - full width at top of screen
-        header.style.position = 'fixed';
-        header.style.top = '0';
-        header.style.left = '0';
-        header.style.right = '0';
-        header.style.height = '120px';
-        header.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
-        header.style.borderBottom = '2px solid #444';
-        header.style.display = 'flex';
-        header.style.alignItems = 'center';
-        header.style.justifyContent = 'center';
-        header.style.gap = '60px';
-        header.style.padding = '20px';
-        header.style.zIndex = '1000';
-        header.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.3)';
-        
-        // Create title section
-        const titleSection = document.createElement('div');
-        titleSection.style.textAlign = 'center';
-        
-        const title = document.createElement('h1');
-        title.textContent = 'IDLETRIS';
-        title.style.margin = '0';
-        title.style.fontSize = '36px';
-        title.style.color = '#4CAF50';
-        title.style.textShadow = '3px 3px 6px rgba(0,0,0,0.7)';
-        title.style.fontFamily = 'Arial, sans-serif';
-        title.style.letterSpacing = '4px';
-        
-        titleSection.appendChild(title);
-        
-        // Create global points display
-        const pointsSection = document.createElement('div');
-        pointsSection.style.textAlign = 'center';
-        pointsSection.style.padding = '15px 30px';
-        pointsSection.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
-        pointsSection.style.borderRadius = '10px';
-        pointsSection.innerHTML = `
-            <div style="font-size: 14px; color: #888; margin-bottom: 5px;">Points</div>
-            <div style="font-size: 32px; font-weight: bold; color: #4CAF50;">
-                <span id="global-points-value">0</span>
-            </div>
-        `;
-        
-        // Create global controls section
-        const controlsSection = document.createElement('div');
-        controlsSection.id = 'global-controls-section';
-        controlsSection.style.textAlign = 'center';
-        controlsSection.style.padding = '15px 25px';
-        controlsSection.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
-        controlsSection.style.borderRadius = '10px';
-        controlsSection.style.fontSize = '12px';
-        controlsSection.style.color = '#aaa';
-        controlsSection.innerHTML = `
-            <div style="margin-bottom: 8px; font-weight: bold; color: #fff;">Controls</div>
-            <div>← → : Move | ↑ : Rotate</div>
-            <div>↓ : Soft Drop | <span id="space-control-text" style="opacity: 0.5;">Space : Locked</span></div>
-        `;
-        
-        // Create global hard drop button container
-        const globalUpgradesSection = document.createElement('div');
-        globalUpgradesSection.id = 'global-upgrades';
-        globalUpgradesSection.style.display = 'flex';
-        globalUpgradesSection.style.gap = '15px';
-        globalUpgradesSection.style.alignItems = 'center';
-        
-        // Add elements to header
-        header.appendChild(titleSection);
-        header.appendChild(pointsSection);
-        header.appendChild(controlsSection);
-        header.appendChild(globalUpgradesSection);
-        
-        // Add header to page
-        document.body.appendChild(header);
-        
-        // Add the global hard drop button to the upgrades section
-        createGlobalHardDropButton();
-        
-        // Add unlock second board button (hidden initially)
-        createUnlockSecondBoardButton();
-        
-        // Add unlock third board button (hidden initially)
-        createUnlockThirdBoardButton();
-
-        addTutorialControls();
-    }
-
-    /**
-     * Creates the global hard drop button in the header
-     */
-    function createGlobalHardDropButton(): void {
-        const globalUpgradesSection = document.getElementById('global-upgrades');
-        if (!globalUpgradesSection) return;
-        
-        const hardDropButton = document.createElement('button');
-        hardDropButton.id = 'global-harddrop-button';
-        hardDropButton.textContent = `Unlock Hard Drop (${HARD_DROP_COST} pt)`;
-        hardDropButton.style.display = 'none';  // Hidden initially
-        hardDropButton.style.padding = '10px 20px';
-        hardDropButton.style.fontSize = '14px';
-        hardDropButton.style.fontWeight = 'bold';
-        hardDropButton.style.backgroundColor = '#2196F3';
-        hardDropButton.style.color = 'white';
-        hardDropButton.style.border = 'none';
-        hardDropButton.style.borderRadius = '8px';
-        hardDropButton.style.cursor = 'pointer';
-        hardDropButton.style.transition = 'all 0.3s ease';
-        
-        // Add hover effect
-        hardDropButton.addEventListener('mouseenter', () => {
-            if (!hardDropButton.disabled) {
-                hardDropButton.style.backgroundColor = '#1976D2';
-                hardDropButton.style.transform = 'scale(1.05)';
-            }
-        });
-        
-        hardDropButton.addEventListener('mouseleave', () => {
-            hardDropButton.style.backgroundColor = hardDropButton.disabled ? '#888888' : '#2196F3';
-            hardDropButton.style.transform = 'scale(1)';
-        });
-        
-        hardDropButton.addEventListener('click', () => {
-            purchaseHardDrop();
-        });
-        
-        globalUpgradesSection.appendChild(hardDropButton);
-    }
-
-    /**
-     * Creates the unlock second board button
-     */
-    function createUnlockSecondBoardButton(): void {
-        const globalUpgradesSection = document.getElementById('global-upgrades');
-        if (!globalUpgradesSection) return;
-        
-        const unlockButton = document.createElement('button');
-        unlockButton.id = 'unlock-second-board-button';
-        unlockButton.textContent = `Unlock 2nd Board (25 pts)`;
-        unlockButton.style.display = 'none';  // Hidden initially
-        unlockButton.style.padding = '10px 20px';
-        unlockButton.style.fontSize = '14px';
-        unlockButton.style.fontWeight = 'bold';
-        unlockButton.style.backgroundColor = '#FF5722';  // Orange-red for major upgrade
-        unlockButton.style.color = 'white';
-        unlockButton.style.border = 'none';
-        unlockButton.style.borderRadius = '8px';
-        unlockButton.style.cursor = 'pointer';
-        unlockButton.style.transition = 'all 0.3s ease';
-        unlockButton.style.animation = 'pulse 2s infinite';
-        
-        // Add hover effect
-        unlockButton.addEventListener('mouseenter', () => {
-            if (!unlockButton.disabled) {
-                unlockButton.style.backgroundColor = '#E64A19';
-                unlockButton.style.transform = 'scale(1.05)';
-            }
-        });
-        
-        unlockButton.addEventListener('mouseleave', () => {
-            unlockButton.style.backgroundColor = unlockButton.disabled ? '#888888' : '#FF5722';
-            unlockButton.style.transform = 'scale(1)';
-        });
-        
-        unlockButton.addEventListener('click', () => {
-            unlockSecondBoard();
-        });
-        
-        globalUpgradesSection.appendChild(unlockButton);
-    }
-
-    /**
-     * Creates the unlock third board button
-     */
-    function createUnlockThirdBoardButton(): void {
-        const globalUpgradesSection = document.getElementById('global-upgrades');
-        if (!globalUpgradesSection) return;
-        
-        const unlockButton = document.createElement('button');
-        unlockButton.id = 'unlock-third-board-button';
-        unlockButton.textContent = `Unlock 3rd Board (${UNLOCK_THIRD_BOARD_COST} pts)`;
-        unlockButton.style.display = 'none';  // Hidden initially
-        unlockButton.style.padding = '10px 20px';
-        unlockButton.style.fontSize = '14px';
-        unlockButton.style.fontWeight = 'bold';
-        unlockButton.style.backgroundColor = '#9C27B0';  // Purple for board 3
-        unlockButton.style.color = 'white';
-        unlockButton.style.border = 'none';
-        unlockButton.style.borderRadius = '8px';
-        unlockButton.style.cursor = 'pointer';
-        unlockButton.style.transition = 'all 0.3s ease';
-        unlockButton.style.animation = 'pulse 2s infinite';
-        
-        // Add hover effect
-        unlockButton.addEventListener('mouseenter', () => {
-            if (!unlockButton.disabled) {
-                unlockButton.style.backgroundColor = '#7B1FA2';
-                unlockButton.style.transform = 'scale(1.05)';
-            }
-        });
-        
-        unlockButton.addEventListener('mouseleave', () => {
-            unlockButton.style.backgroundColor = unlockButton.disabled ? '#888888' : '#9C27B0';
-            unlockButton.style.transform = 'scale(1)';
-        });
-        
-        unlockButton.addEventListener('click', () => {
-            unlockThirdBoard();
-        });
-        
-        globalUpgradesSection.appendChild(unlockButton);
-    }
-
-    /**
-     * Creates the UI container for a specific board
-     * This sits next to each game board and shows board-specific information
-     */
-    function createUI(): void {
-        // First create the global header
-        createGlobalHeader();
-
-        createDialogueSystem();
-        
-const gameContainer = document.createElement('div');
-gameContainer.id = 'game-container';
-gameContainer.style.display = 'flex';
-gameContainer.style.gap = '40px';
-gameContainer.style.alignItems = 'flex-start';
-gameContainer.style.justifyContent = 'flex-start';  // ADD THIS - align to left, not center
-
-// Let index.html handle the overall page layout.
-const gameArea = document.getElementById('game-area');
-if (gameArea) {
-  gameArea.appendChild(gameContainer);
-} else {
-  // Fallback: append to body if #game-area is missing
-  document.body.appendChild(gameContainer);
-}
-
-        
-        // Create the first board's container
-        const board1Container = document.createElement('div');
-        board1Container.id = 'board-1-container';
-        board1Container.style.display = 'flex';
-        board1Container.style.gap = '20px';
-        
-        gameContainer.appendChild(board1Container);
-        
-        // Now create the board-specific UI
-        createBoardUI(1);
-    }
-    /**
-     * Creates the UI for a specific board (board 1 or 2)
-     * Each board has its own upgrades and stats
-     */
-    function createBoardUI(boardNumber: number): void {
-        const boardContainer = document.getElementById(`board-${boardNumber}-container`);
-        if (!boardContainer) return;
-        
-        // Create the UI panel for this board
-        const uiPanel = document.createElement('div');
-        uiPanel.id = `board-${boardNumber}-ui`;
-        uiPanel.style.width = '200px';
-        uiPanel.style.padding = '20px';
-        uiPanel.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-        uiPanel.style.borderRadius = '12px';
-        uiPanel.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.3)';
-        uiPanel.style.color = 'white';
-        uiPanel.style.fontFamily = 'Arial, sans-serif';
-        
-        // Board label
-        const boardLabel = document.createElement('h3');
-        boardLabel.textContent = `Board ${boardNumber}`;
-        boardLabel.style.margin = '0 0 15px 0';
-        boardLabel.style.textAlign = 'center';
-        boardLabel.style.color = boardNumber === 1 ? '#4CAF50' : '#2196F3';
-        boardLabel.style.fontSize = '18px';
-        
-        // Next piece preview for this board
-        const nextPieceSection = document.createElement('div');
-        nextPieceSection.style.marginBottom = '20px';
-        nextPieceSection.style.padding = '15px';
-        nextPieceSection.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
-        nextPieceSection.style.borderRadius = '8px';
-        nextPieceSection.innerHTML = `
-            <div style="font-size: 14px; opacity: 0.7; margin-bottom: 10px; text-align: center;">Next Piece</div>
-        `;
-        
-        const nextPieceCanvas = document.createElement('canvas');
-        nextPieceCanvas.id = `next-piece-canvas-${boardNumber}`;
-        nextPieceCanvas.width = 100;
-        nextPieceCanvas.height = 80;
-        nextPieceCanvas.style.display = 'block';
-        nextPieceCanvas.style.margin = '0 auto';
-        nextPieceCanvas.style.border = '2px solid #333';
-        nextPieceCanvas.style.borderRadius = '4px';
-        nextPieceCanvas.style.backgroundColor = '#111';
-        
-        nextPieceSection.appendChild(nextPieceCanvas);
-        
-        // Lines cleared for this board
-        const statsSection = document.createElement('div');
-        statsSection.style.marginBottom = '20px';
-        statsSection.style.padding = '15px';
-        statsSection.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
-        statsSection.style.borderRadius = '8px';
-        statsSection.innerHTML = `
-            <div style="font-size: 14px; opacity: 0.7;">Lines Cleared</div>
-            <div style="font-size: 24px; font-weight: bold;">
-                <span id="board-${boardNumber}-lines">0</span>
-            </div>
-        `;
-        
-        // Board status (Player/AI)
-        const statusSection = document.createElement('div');
-        statusSection.id = `board-${boardNumber}-status`;
-        statusSection.style.marginBottom = '20px';
-        statusSection.style.padding = '10px';
-        statusSection.style.backgroundColor = 'rgba(76, 175, 80, 0.2)';
-        statusSection.style.borderRadius = '8px';
-        statusSection.style.textAlign = 'center';
-        statusSection.style.fontSize = '14px';
-        statusSection.innerHTML = '<span>🎮 Player Control</span>';
-        
-        // Upgrades section for this board
-        const upgradesSection = document.createElement('div');
-        upgradesSection.id = `board-${boardNumber}-upgrades`;
-        upgradesSection.style.display = 'flex';
-        upgradesSection.style.flexDirection = 'column';
-        upgradesSection.style.gap = '10px';
-        
-        // Assemble the UI panel
-        // uiPanel.appendChild(boardLabel);
-        uiPanel.appendChild(nextPieceSection);
-        uiPanel.appendChild(statsSection);
-        uiPanel.appendChild(statusSection);
-        uiPanel.appendChild(upgradesSection);
-        
-        // Add to board container (UI goes after the canvas)
-        boardContainer.appendChild(uiPanel);
-        
-        // For board 1, migrate the existing upgrade buttons
-        if (boardNumber === 1) {
-            // We'll handle this in the next step
-            setTimeout(() => createBoardUpgradeButtons(1), 100);
-        }
-    }
-
-    /**
-     * Creates the UI for board 2 with next piece preview and upgrades
-     * Board 2 has its own independent upgrade progression
-     */
-    function createMinimalBoardUI(boardNumber: number): void {
-        const boardContainer = document.getElementById(`board-${boardNumber}-container`);
-        if (!boardContainer) return;
-        
-        // Create the UI panel for this board
-        const uiPanel = document.createElement('div');
-        uiPanel.id = `board-${boardNumber}-ui`;
-        uiPanel.style.width = '200px';  // Same width as board 1's UI
-        uiPanel.style.padding = '20px';
-        uiPanel.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-        uiPanel.style.borderRadius = '12px';
-        uiPanel.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.3)';
-        uiPanel.style.color = 'white';
-        uiPanel.style.fontFamily = 'Arial, sans-serif';
-        
-        // Board label
-        const boardLabel = document.createElement('h3');
-        boardLabel.textContent = `Board ${boardNumber}`;
-        boardLabel.style.margin = '0 0 15px 0';
-        boardLabel.style.textAlign = 'center';
-        boardLabel.style.color = '#2196F3';  // Blue for board 2
-        boardLabel.style.fontSize = '18px';
-        
-        // Next piece preview for this board
-        const nextPieceSection = document.createElement('div');
-        nextPieceSection.style.marginBottom = '20px';
-        nextPieceSection.style.padding = '15px';
-        nextPieceSection.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
-        nextPieceSection.style.borderRadius = '8px';
-        nextPieceSection.innerHTML = `
-            <div style="font-size: 14px; opacity: 0.7; margin-bottom: 10px; text-align: center;">Next Piece</div>
-        `;
-        
-        const nextPieceCanvas = document.createElement('canvas');
-        nextPieceCanvas.id = `next-piece-canvas-${boardNumber}`;
-        nextPieceCanvas.width = 100;
-        nextPieceCanvas.height = 80;
-        nextPieceCanvas.style.display = 'block';
-        nextPieceCanvas.style.margin = '0 auto';
-        nextPieceCanvas.style.border = '2px solid #333';
-        nextPieceCanvas.style.borderRadius = '4px';
-        nextPieceCanvas.style.backgroundColor = '#111';
-        
-        nextPieceSection.appendChild(nextPieceCanvas);
-        
-        // Lines cleared counter
-        const statsSection = document.createElement('div');
-        statsSection.style.marginBottom = '20px';
-        statsSection.style.padding = '15px';
-        statsSection.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
-        statsSection.style.borderRadius = '8px';
-        statsSection.innerHTML = `
-            <div style="font-size: 14px; opacity: 0.7;">Lines Cleared</div>
-            <div style="font-size: 24px; font-weight: bold;">
-                <span id="board-${boardNumber}-lines">0</span>
-            </div>
-        `;
-        
-        // Board status (Player/AI)
-        const statusSection = document.createElement('div');
-        statusSection.id = `board-${boardNumber}-status`;
-        statusSection.style.marginBottom = '20px';
-        statusSection.style.padding = '10px';
-        statusSection.style.backgroundColor = 'rgba(76, 175, 80, 0.2)';
-        statusSection.style.borderRadius = '8px';
-        statusSection.style.textAlign = 'center';
-        statusSection.style.fontSize = '14px';
-        statusSection.innerHTML = '<span>🎮 Player Control</span>';
-        
-        // Upgrades section for this board
-        const upgradesSection = document.createElement('div');
-        upgradesSection.id = `board-${boardNumber}-upgrades`;
-        upgradesSection.style.display = 'flex';
-        upgradesSection.style.flexDirection = 'column';
-        upgradesSection.style.gap = '10px';
-        
-        // Assemble the UI panel
-        uiPanel.appendChild(nextPieceSection);
-        uiPanel.appendChild(statsSection);
-        uiPanel.appendChild(statusSection);
-        uiPanel.appendChild(upgradesSection);
-        
-        // Add to board container
-        boardContainer.appendChild(uiPanel);
-        
-        // Create upgrade buttons for board 2
-        setTimeout(() => createBoardUpgradeButtons(2), 100);
-    }
-
-    /**
-     * Simplifies Board 1's UI when the second board is unlocked
-     * Hides the next piece preview and upgrade buttons since board 1 is now fully AI-controlled
-     */
-    function simplifyBoard1UI(): void {
-        // Hide the next piece preview section for board 1
-        // The AI doesn't need a preview since it calculates moves automatically
-        const nextPieceCanvas = document.getElementById('next-piece-canvas-1');
-        if (nextPieceCanvas && nextPieceCanvas.parentElement) {
-            // Hide the entire "Next Piece" section (the parent container)
-            nextPieceCanvas.parentElement.style.display = 'none';
-        }
-        
-        // Hide the upgrades section for board 1 (all buttons: AI Active, AI Hard Drop, AI Speed)
-        const upgradesSection = document.getElementById('board-1-upgrades');
-        if (upgradesSection) {
-            upgradesSection.style.display = 'none';
-        }
-        
-        // Optionally, we could also hide the force next piece container if it exists
-        const forceNextPieceContainer = document.getElementById('force-next-piece-container-1');
-        if (forceNextPieceContainer) {
-            forceNextPieceContainer.style.display = 'none';
-        }
-        
-        console.log("Board 1 UI simplified - hiding next piece preview and upgrade buttons");
-    }
-
-    /**
-     * Creates the upgrade buttons specific to a board
-     * Each board has its own AI and upgrade progression
-     */
-    function createBoardUpgradeButtons(boardNumber: number): void {
-        const upgradesSection = document.getElementById(`board-${boardNumber}-upgrades`);
-        if (!upgradesSection) return;
-        
-        // =====================================================
-        // FORCE NEXT PIECE CONTAINER
-        // This replaces the old "Buy I Piece" button
-        // Contains either: unlock button OR piece selection icons
-        // =====================================================
-        const forceNextPieceContainer = document.createElement('div');
-        forceNextPieceContainer.id = `force-next-piece-container-${boardNumber}`;
-        forceNextPieceContainer.style.display = 'none';  // Hidden until player has enough points
-        forceNextPieceContainer.style.width = '100%';
-        forceNextPieceContainer.style.padding = '10px';
-        forceNextPieceContainer.style.backgroundColor = 'rgba(156, 39, 176, 0.1)';  // Light purple tint
-        forceNextPieceContainer.style.borderRadius = '8px';
-        forceNextPieceContainer.style.marginBottom = '10px';
-        
-        // Label for the force next piece section
-        const forceNextPieceLabel = document.createElement('div');
-        forceNextPieceLabel.style.fontSize = '12px';
-        forceNextPieceLabel.style.color = '#aaa';
-        forceNextPieceLabel.style.marginBottom = '8px';
-        forceNextPieceLabel.style.textAlign = 'center';
-        forceNextPieceLabel.textContent = 'Force Next Piece';
-        forceNextPieceContainer.appendChild(forceNextPieceLabel);
-        
-        // Unlock button (shown before upgrade is purchased)
-        const forceNextPieceUnlockButton = document.createElement('button');
-        forceNextPieceUnlockButton.id = `force-next-piece-unlock-button-${boardNumber}`;
-        forceNextPieceUnlockButton.textContent = `Unlock (${FORCE_NEXT_PIECE_UNLOCK_COST} pts)`;
-        forceNextPieceUnlockButton.style.width = '100%';
-        forceNextPieceUnlockButton.style.padding = '8px';
-        forceNextPieceUnlockButton.style.fontSize = '13px';
-        forceNextPieceUnlockButton.style.fontWeight = 'bold';
-        forceNextPieceUnlockButton.style.backgroundColor = '#9C27B0';
-        forceNextPieceUnlockButton.style.color = 'white';
-        forceNextPieceUnlockButton.style.border = 'none';
-        forceNextPieceUnlockButton.style.borderRadius = '6px';
-        forceNextPieceUnlockButton.style.cursor = 'pointer';
-        forceNextPieceUnlockButton.style.transition = 'all 0.3s ease';
-        forceNextPieceContainer.appendChild(forceNextPieceUnlockButton);
-        
-        // Piece icons container (shown after upgrade is purchased)
-        // Contains 7 clickable piece icons: I, O, T, S, Z, J, L
-        const pieceIconsContainer = document.createElement('div');
-        pieceIconsContainer.id = `piece-icons-container-${boardNumber}`;
-        pieceIconsContainer.style.display = 'none';  // Hidden until upgrade is unlocked
-        pieceIconsContainer.style.flexWrap = 'wrap';
-        pieceIconsContainer.style.gap = '6px';
-        pieceIconsContainer.style.justifyContent = 'center';
-        
-        // Cost indicator below icons
-        const costIndicator = document.createElement('div');
-        costIndicator.id = `force-piece-cost-${boardNumber}`;
-        costIndicator.style.fontSize = '11px';
-        costIndicator.style.color = '#888';
-        costIndicator.style.textAlign = 'center';
-        costIndicator.style.marginTop = '6px';
-        costIndicator.textContent = `${FORCE_NEXT_PIECE_USE_COST} pts per use`;
-        
-        // Create an icon for each piece type
-        const pieceTypes: PieceType[] = ['I', 'O', 'T', 'S', 'Z', 'J', 'L'];
-        pieceTypes.forEach(pieceType => {
-            const icon = document.createElement('button');
-            icon.id = `force-piece-icon-${pieceType}-${boardNumber}`;
-            icon.style.width = '24px';
-            icon.style.height = '24px';
-            icon.style.padding = '0';
-            icon.style.border = '2px solid #333';
-            icon.style.borderRadius = '4px';
-            icon.style.backgroundColor = PIECE_COLORS[pieceType];  // Use the piece's actual color
-            icon.style.cursor = 'pointer';
-            icon.style.transition = 'all 0.2s ease';
-            icon.style.opacity = '0.5';  // Dimmed by default (will light up when affordable)
-            icon.title = `Force ${pieceType} piece (${FORCE_NEXT_PIECE_USE_COST} pts)`;
-            
-            // Hover effect
-            icon.addEventListener('mouseenter', () => {
-                if (!icon.disabled) {
-                    icon.style.transform = 'scale(1.15)';
-                    icon.style.boxShadow = `0 0 8px ${PIECE_COLORS[pieceType]}`;
-                }
-            });
-            
-            icon.addEventListener('mouseleave', () => {
-                icon.style.transform = 'scale(1)';
-                icon.style.boxShadow = 'none';
-            });
-            
-            // Click handler to force the next piece
-            icon.addEventListener('click', () => {
-                if (boardNumber === 1) {
-                    forceNextPiece(pieceType);
-                } else if (boardNumber === 2) {
-                    forceNextPieceBoard2(pieceType);
-                } else {
-                    forceNextPieceBoard3(pieceType);
-                }
-            });
-            
-            pieceIconsContainer.appendChild(icon);
-        });
-        
-        pieceIconsContainer.appendChild(costIndicator);
-        forceNextPieceContainer.appendChild(pieceIconsContainer);
-        
-        // Unlock button click handler
-        forceNextPieceUnlockButton.addEventListener('click', () => {
-            purchaseForceNextPieceUpgrade();
-        });
-        
-        // Hover effect for unlock button
-        forceNextPieceUnlockButton.addEventListener('mouseenter', () => {
-            if (!forceNextPieceUnlockButton.disabled) {
-                forceNextPieceUnlockButton.style.transform = 'scale(1.05)';
-                forceNextPieceUnlockButton.style.backgroundColor = '#AB47BC';
-            }
-        });
-        
-        forceNextPieceUnlockButton.addEventListener('mouseleave', () => {
-            forceNextPieceUnlockButton.style.transform = 'scale(1)';
-            if (!forceNextPieceUnlockButton.disabled) {
-                forceNextPieceUnlockButton.style.backgroundColor = '#9C27B0';
-            }
-        });
-        
-        // Hire AI button
-        const aiButton = document.createElement('button');
-        aiButton.id = `ai-button-${boardNumber}`;
-        aiButton.textContent = `Hire AI (${AI_PLAYER_COST} pts)`;
-        aiButton.style.display = 'none';
-        aiButton.style.width = '100%';
-        aiButton.style.padding = '10px';
-        aiButton.style.fontSize = '13px';
-        aiButton.style.fontWeight = 'bold';
-        aiButton.style.backgroundColor = '#4CAF50';
-        aiButton.style.color = 'white';
-        aiButton.style.border = 'none';
-        aiButton.style.borderRadius = '6px';
-        aiButton.style.cursor = 'pointer';
-        aiButton.style.transition = 'all 0.3s ease';
-        
-        // AI Hard Drop button
-        const aiHardDropButton = document.createElement('button');
-        aiHardDropButton.id = `ai-harddrop-button-${boardNumber}`;
-        aiHardDropButton.textContent = `AI Hard Drop (${AI_HARD_DROP_COST} pts)`;
-        aiHardDropButton.style.display = 'none';
-        aiHardDropButton.style.width = '100%';
-        aiHardDropButton.style.padding = '10px';
-        aiHardDropButton.style.fontSize = '13px';
-        aiHardDropButton.style.fontWeight = 'bold';
-        aiHardDropButton.style.backgroundColor = '#FF9800';
-        aiHardDropButton.style.color = 'white';
-        aiHardDropButton.style.border = 'none';
-        aiHardDropButton.style.borderRadius = '6px';
-        aiHardDropButton.style.cursor = 'pointer';
-        aiHardDropButton.style.transition = 'all 0.3s ease';
-        
-        // AI Speed button
-        const aiSpeedButton = document.createElement('button');
-        aiSpeedButton.id = `ai-speed-button-${boardNumber}`;
-        aiSpeedButton.textContent = `AI Speed Lv1 (${AI_SPEED_UPGRADE_COST} pts)`;
-        aiSpeedButton.style.display = 'none';
-        aiSpeedButton.style.width = '100%';
-        aiSpeedButton.style.padding = '10px';
-        aiSpeedButton.style.fontSize = '13px';
-        aiSpeedButton.style.fontWeight = 'bold';
-        aiSpeedButton.style.backgroundColor = '#00BCD4';
-        aiSpeedButton.style.color = 'white';
-        aiSpeedButton.style.border = 'none';
-        aiSpeedButton.style.borderRadius = '6px';
-        aiSpeedButton.style.cursor = 'pointer';
-        aiSpeedButton.style.transition = 'all 0.3s ease';
-        
-        // Add all buttons/containers to the upgrades section
-        // Force Next Piece container replaces the old Buy I Piece button
-        upgradesSection.appendChild(forceNextPieceContainer);
-        upgradesSection.appendChild(aiButton);
-        upgradesSection.appendChild(aiHardDropButton);
-        upgradesSection.appendChild(aiSpeedButton);
-        
-        // Event listeners for force next piece are already added above during icon creation
-        // The unlock button and piece icons have their handlers attached inline
-        
-        aiButton.addEventListener('click', () => {
-            if (boardNumber === 1) {
-                hireAIPlayer();
-            } else if (boardNumber === 2) {
-                hireAIPlayerBoard2();
-            } else {
-                hireAIPlayerBoard3();
-            }
-        });
-        
-        aiHardDropButton.addEventListener('click', () => {
-        if (boardNumber === 1) {
-            purchaseAIHardDrop();
-        } else if (boardNumber === 2) {
-            purchaseAIHardDropBoard2();
-        } else {
-            purchaseAIHardDropBoard3();
-        }
-        });
-
-        aiSpeedButton.addEventListener('click', () => {
-        if (boardNumber === 1) {
-            purchaseAISpeedUpgrade();
-        } else if (boardNumber === 2) {
-            purchaseAISpeedUpgradeBoard2();
-        } else {
-            purchaseAISpeedUpgradeBoard3();
-        }
-        });
-
-
-        // Add hover effects to the main buttons (force next piece has its own hover handlers)
-        [aiButton, aiHardDropButton, aiSpeedButton].forEach(button => {
-            button.addEventListener('mouseenter', () => {
-                if (!button.disabled) {
-                    button.style.transform = 'scale(1.05)';
-                }
-            });
-            
-            button.addEventListener('mouseleave', () => {
-                button.style.transform = 'scale(1)';
-            });
-        });
-    }
-
-    // =====================================================
-    // FORCE NEXT PIECE FUNCTIONS
-    // =====================================================
-    
-    /**
-     * Handles purchasing the Force Next Piece upgrade (one-time unlock)
-     * After this, players can spend points to change the next piece
-     */
-    function purchaseForceNextPieceUpgrade(): void {
-        // Check if already unlocked
-        if (forceNextPieceUnlocked) {
-            console.log("Force Next Piece already unlocked!");
-            return;
-        }
-        
-        // Check if player has enough points
-        if (points < FORCE_NEXT_PIECE_UNLOCK_COST) {
-            console.log("Not enough points to unlock Force Next Piece!");
-            return;
-        }
-        
-        // Deduct the points
-        points -= FORCE_NEXT_PIECE_UNLOCK_COST;
-        
-        // Unlock the upgrade permanently
-        forceNextPieceUnlocked = true;
-        
-        // Update displays
-        updatePointsDisplay();
-        updateForceNextPieceUI(1);  // Update board 1's UI
-        
-        // Show success message
-        console.log("Force Next Piece unlocked! You can now choose your next piece.");
-        
-        // Visual feedback - purple flash
-        const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
-        if (canvas) {
-            canvas.style.transition = 'box-shadow 0.5s ease';
-            canvas.style.boxShadow = '0 0 40px rgba(156, 39, 176, 0.8)';
-            
-            setTimeout(() => {
-                canvas.style.boxShadow = '0 0 20px rgba(0,0,0,0.3)';
-            }, 500);
-        }
-        
-        // Show tutorial dialogue
-        const container = document.getElementById('force-next-piece-container-1');
-        if (container && !shownDialogues.has('force-next-piece')) {
-            showDialogue('force-next-piece', container);
-        }
-    }
-    
-    /**
-     * Forces the next piece on board 1 to be the specified type
-     * @param pieceType - The type of piece to force (I, O, T, S, Z, J, L)
-     */
-    function forceNextPiece(pieceType: PieceType): void {
-        // Check if upgrade is unlocked
-        if (!forceNextPieceUnlocked) {
-            console.log("Force Next Piece not unlocked yet!");
-            return;
-        }
-        
-        // Check if next piece is already this type (can't force same piece)
-        if (nextPiece === pieceType) {
-            console.log(`Next piece is already '${pieceType}'!`);
-            // Flash the icon to show it's already selected
-            const icon = document.getElementById(`force-piece-icon-${pieceType}-1`);
-            if (icon) {
-                icon.style.animation = 'shake 0.3s ease';
-                setTimeout(() => {
-                    icon.style.animation = '';
-                }, 300);
-            }
-            return;
-        }
-        
-        // Check if player has enough points
-        if (points < FORCE_NEXT_PIECE_USE_COST) {
-            console.log("Not enough points to force next piece!");
-            return;
-        }
-        
-        // Deduct the points
-        points -= FORCE_NEXT_PIECE_USE_COST;
-        
-        // Change the next piece
-        nextPiece = pieceType;
-        
-        // Update displays
-        updatePointsDisplay();
-        updateNextPiecePreview(1);
-
-        // Reset AI state so it can calculate a move for the new piece
-        aiTargetPosition = null;
-        aiMoving = false;
-        
-        // Show success message
-        console.log(`Next piece changed to '${pieceType}'!`);
-        
-        // Visual feedback - flash the piece's color
-        const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
-        if (canvas) {
-            canvas.style.transition = 'box-shadow 0.5s ease';
-            canvas.style.boxShadow = `0 0 40px ${PIECE_COLORS[pieceType]}80`;  // 80 = 50% opacity
-            
-            setTimeout(() => {
-                canvas.style.boxShadow = '0 0 20px rgba(0,0,0,0.3)';
-            }, 500);
-        }
-        
-        // Flash the next piece preview
-        const previewCanvas = document.getElementById('next-piece-canvas-1') as HTMLCanvasElement;
-        if (previewCanvas) {
-            previewCanvas.style.transition = 'transform 0.3s ease';
-            previewCanvas.style.transform = 'scale(1.2)';
-            setTimeout(() => {
-                previewCanvas.style.transform = 'scale(1)';
-            }, 300);
-        }
-    }
-    
-    /**
-     * Forces the next piece on board 2 to be the specified type
-     * @param pieceType - The type of piece to force (I, O, T, S, Z, J, L)
-     */
-    function forceNextPieceBoard2(pieceType: PieceType): void {
-        // Check if upgrade is unlocked (same global upgrade)
-        if (!forceNextPieceUnlocked) {
-            console.log("Force Next Piece not unlocked yet!");
-            return;
-        }
-        
-        // Check if next piece is already this type
-        if (nextPieceBoard2 === pieceType) {
-            console.log(`Board 2: Next piece is already '${pieceType}'!`);
-            return;
-        }
-        
-        // Check if player has enough points
-        if (points < FORCE_NEXT_PIECE_USE_COST) {
-            console.log("Not enough points to force next piece!");
-            return;
-        }
-        
-        // Deduct the points
-        points -= FORCE_NEXT_PIECE_USE_COST;
-        
-        // Change the next piece for board 2
-        nextPieceBoard2 = pieceType;
-        
-        // Update displays
-        updatePointsDisplay();
-        updateNextPiecePreview(2);
-        
-        console.log(`Board 2: Next piece changed to '${pieceType}'!`);
-    }
-    
-    /**
-     * Updates the Force Next Piece UI for a specific board
-     * Shows unlock button before purchase, piece icons after purchase
-     */
-    function updateForceNextPieceUI(boardNumber: number): void {
-        const container = document.getElementById(`force-next-piece-container-${boardNumber}`);
-        const unlockButton = document.getElementById(`force-next-piece-unlock-button-${boardNumber}`) as HTMLButtonElement;
-        const iconsContainer = document.getElementById(`piece-icons-container-${boardNumber}`);
-        
-        if (!container || !unlockButton || !iconsContainer) return;
-        
-        // Determine which next piece to check based on board
-        let currentNextPiece: PieceType | null;
-        if (boardNumber === 1) {
-            currentNextPiece = nextPiece;
-        } else if (boardNumber === 2) {
-            currentNextPiece = nextPieceBoard2;
-        } else {
-            currentNextPiece = nextPieceBoard3;
-        }
-        
-        if (forceNextPieceUnlocked) {
-            // Upgrade is unlocked - show piece icons, hide unlock button
-            unlockButton.style.display = 'none';
-            iconsContainer.style.display = 'flex';
-            container.style.display = 'block';
-            
-            // Update each piece icon's state
-            const pieceTypes: PieceType[] = ['I', 'O', 'T', 'S', 'Z', 'J', 'L'];
-            pieceTypes.forEach(pieceType => {
-                const icon = document.getElementById(`force-piece-icon-${pieceType}-${boardNumber}`) as HTMLButtonElement;
-                if (!icon) return;
-                
-                const isCurrentNextPiece = currentNextPiece === pieceType;
-                const canAfford = points >= FORCE_NEXT_PIECE_USE_COST;
-                
-                if (isCurrentNextPiece) {
-                    // This piece is already the next piece - disable and show as selected
-                    icon.disabled = true;
-                    icon.style.opacity = '1';
-                    icon.style.cursor = 'not-allowed';
-                    icon.style.border = '2px solid #fff';  // White border to show selected
-                    icon.title = `Already next piece`;
-                } else if (canAfford) {
-                    // Player can afford to select this piece
-                    icon.disabled = false;
-                    icon.style.opacity = '1';
-                    icon.style.cursor = 'pointer';
-                    icon.style.border = '2px solid #333';
-                    icon.title = `Force ${pieceType} piece (${FORCE_NEXT_PIECE_USE_COST} pts)`;
-                } else {
-                    // Player can't afford - dim the icon
-                    icon.disabled = true;
-                    icon.style.opacity = '0.3';
-                    icon.style.cursor = 'not-allowed';
-                    icon.style.border = '2px solid #333';
-                    icon.title = `Need ${FORCE_NEXT_PIECE_USE_COST} pts`;
-                }
-            });
-        } else {
-            // Upgrade not unlocked yet - show unlock button if player has enough points
-            iconsContainer.style.display = 'none';
-            
-            if (points >= FORCE_NEXT_PIECE_UNLOCK_COST) {
-                // Player can afford to unlock
-                container.style.display = 'block';
-                unlockButton.style.display = 'block';
-                unlockButton.disabled = false;
-                unlockButton.style.backgroundColor = '#9C27B0';
-                unlockButton.style.cursor = 'pointer';
-            } else {
-                // Not enough points to unlock - hide the container
-                container.style.display = 'none';
-            }
-        }
-    }
-
-    /**
-     * Handles purchasing the AI Hard Drop upgrade
-     * Allows AI to instantly place pieces instead of dropping row by row
-     */
-    function purchaseAIHardDrop(): void {
-    // Check if player has enough points
-    if (points < AI_HARD_DROP_COST) {
-        console.log("Not enough points for AI Hard Drop!");
-        return;
-    }
-    
-    // Deduct the points
-    points -= AI_HARD_DROP_COST;
-    
-    // Unlock AI hard drop
-    aiHardDropUnlocked = true;
-    
-    // Update the display
-    updatePointsDisplay();
-    updateAIHardDropButtonBoard(1);  // Update board 1's button
-    
-    // Show success message
-    console.log("AI Hard Drop unlocked! AI can now instantly place pieces.");
-    
-    // Visual feedback - orange flash
-    const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
-    if (canvas) {
-        canvas.style.transition = 'box-shadow 0.5s ease';
-        canvas.style.boxShadow = '0 0 40px rgba(255,152,0,0.8)';
-        
-        setTimeout(() => {
-            canvas.style.boxShadow = '0 0 20px rgba(0,0,0,0.3)';
-        }, 500);
-    }
-}
-    /**
-     * Handles purchasing an AI speed upgrade
-     * Makes the AI place pieces faster (up to 5 upgrades)
-     */
-    function purchaseAISpeedUpgrade(): void {
-    // Check if already at max upgrades
-    if (aiSpeedLevel >= MAX_AI_SPEED_UPGRADES) {
-        console.log("AI speed already at maximum!");
-        return;
-    }
-    
-    // Check if player has enough points
-    if (points < AI_SPEED_UPGRADE_COST) {
-        console.log("Not enough points for AI speed upgrade!");
-        return;
-    }
-    
-    // Deduct the points
-    points -= AI_SPEED_UPGRADE_COST;
-    
-    // Increase speed level
-    aiSpeedLevel++;
-    
-    // Calculate new AI speed
-    // Each upgrade multiplies speed by 1.5x (divides delay time by 1.5)
-    // Formula: baseSpeed / (1.5 ^ upgradeLevel)
-    aiSpeed = BASE_AI_SPEED / Math.pow(1.5, aiSpeedLevel);
-    
-    // Update the display
-    updatePointsDisplay();
-    updateAISpeedButtonBoard(1);  // Update board 1's button
-    
-    // Show success message
-    console.log(`AI speed upgraded to level ${aiSpeedLevel}! New speed: ${aiSpeed.toFixed(0)}ms`);
-    
-    // Visual feedback - cyan flash
-    const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
-    if (canvas) {
-        canvas.style.transition = 'box-shadow 0.5s ease';
-        canvas.style.boxShadow = '0 0 40px rgba(0,188,212,0.8)';
-        
-        setTimeout(() => {
-            canvas.style.boxShadow = '0 0 20px rgba(0,0,0,0.3)';
-        }, 500);
-    }
-}
-    /**
-     * Creates the Game Over overlay screen
-     * This appears when the player loses, covering the game board
-     */
-    function createGameOverScreen(): void {
-        // Create the dark overlay that covers everything
-        const overlay = document.createElement('div');
-        overlay.id = 'game-over-overlay';
-        
-        // Style the overlay - covers entire screen with semi-transparent black
-        overlay.style.position = 'fixed';
-        overlay.style.top = '0';
-        overlay.style.left = '0';
-        overlay.style.width = '100%';
-        overlay.style.height = '100%';
-        overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';  // Dark semi-transparent background
-        overlay.style.display = 'none';  // Hidden by default
-        overlay.style.justifyContent = 'center';
-        overlay.style.alignItems = 'center';
-        overlay.style.zIndex = '9999';  // Appears above everything else
-        overlay.style.opacity = '0';  // Start invisible for fade-in effect
-        overlay.style.transition = 'opacity 0.5s ease';
-        
-        // Create the Game Over panel (the white box in the center)
-        const panel = document.createElement('div');
-        panel.style.backgroundColor = '#1a1a1a';  // Dark background for the panel
-        panel.style.padding = '50px';
-        panel.style.borderRadius = '20px';
-        panel.style.boxShadow = '0 10px 40px rgba(0,0,0,0.5)';
-        panel.style.textAlign = 'center';
-        panel.style.maxWidth = '500px';
-        panel.style.border = '3px solid #ff4444';  // Red border for emphasis
-        
-        // Create the "GAME OVER" title
-        const title = document.createElement('h1');
-        title.textContent = 'GAME OVER';
-        title.style.color = '#ff4444';  // Red text
-        title.style.fontSize = '48px';
-        title.style.margin = '0 0 30px 0';
-        title.style.fontFamily = 'Arial, sans-serif';
-        title.style.textShadow = '2px 2px 8px rgba(255,68,68,0.5)';
-        title.style.letterSpacing = '2px';
-        
-        // Create the stats section (shows final score)
-        const stats = document.createElement('div');
-        stats.id = 'game-over-stats';
-        stats.style.color = 'white';
-        stats.style.fontSize = '20px';
-        stats.style.marginBottom = '40px';
-        stats.style.lineHeight = '1.8';
-        stats.innerHTML = `
-            <div style="margin-bottom: 15px;">
-                <span style="opacity: 0.7;">Final Score:</span>
-                <span style="font-size: 32px; font-weight: bold; color: #4CAF50; margin-left: 10px;" id="final-points">0</span>
-            </div>
-            <div>
-                <span style="opacity: 0.7;">Total Lines Cleared:</span>
-                <span style="font-size: 24px; font-weight: bold; margin-left: 10px;" id="final-lines">0</span>
-            </div>
-        `;
-        
-        // Create the Reset button
-        const resetButton = document.createElement('button');
-        resetButton.textContent = 'PLAY AGAIN';
-        resetButton.style.padding = '15px 50px';
-        resetButton.style.fontSize = '20px';
-        resetButton.style.fontWeight = 'bold';
-        resetButton.style.backgroundColor = '#4CAF50';
-        resetButton.style.color = 'white';
-        resetButton.style.border = 'none';
-        resetButton.style.borderRadius = '10px';
-        resetButton.style.cursor = 'pointer';
-        resetButton.style.boxShadow = '0 4px 6px rgba(0,0,0,0.3)';
-        resetButton.style.transition = 'all 0.3s ease';
-        resetButton.style.fontFamily = 'Arial, sans-serif';
-        
-        // Add hover effect for the reset button
-        resetButton.addEventListener('mouseenter', () => {
-            resetButton.style.backgroundColor = '#45a049';
-            resetButton.style.transform = 'scale(1.05)';
-            resetButton.style.boxShadow = '0 6px 12px rgba(76,175,80,0.4)';
-        });
-        
-        resetButton.addEventListener('mouseleave', () => {
-            resetButton.style.backgroundColor = '#4CAF50';
-            resetButton.style.transform = 'scale(1)';
-            resetButton.style.boxShadow = '0 4px 6px rgba(0,0,0,0.3)';
-        });
-        
-        // Add click handler to reset the game
-        resetButton.addEventListener('click', () => {
-            resetGame();
-        });
-        
-        // Assemble the panel
-        panel.appendChild(title);
-        panel.appendChild(stats);
-        panel.appendChild(resetButton);
-        
-        // Add panel to overlay
-        overlay.appendChild(panel);
-        
-        // Add overlay to the page
-        document.body.appendChild(overlay);
-    }
-    /**
-     * Shows the Game Over screen with a smooth fade-in animation
-     * Displays the player's final stats
-     */
-    function showGameOverScreen(): void {
-        const overlay = document.getElementById('game-over-overlay');
-        if (!overlay) return;
-        
-        // Update the final stats on the game over screen
-        const finalPoints = document.getElementById('final-points');
-        const finalLines = document.getElementById('final-lines');
-        
-        if (finalPoints) finalPoints.textContent = points.toString();
-        if (finalLines) finalLines.textContent = totalLinesCleared.toString();
-        
-        // Show the overlay
-        overlay.style.display = 'flex';
-        
-        // Trigger fade-in animation (small delay so CSS transition works)
-        setTimeout(() => {
-            overlay.style.opacity = '1';
-        }, 10);
-        
-        console.log("Game Over! Final score:", points);
-    }
-
-    /**
-     * Hides the Game Over screen with a fade-out animation
-     */
-    function hideGameOverScreen(): void {
-        const overlay = document.getElementById('game-over-overlay');
-        if (!overlay) return;
-        
-        // Fade out
-        overlay.style.opacity = '0';
-        
-        // Hide completely after fade animation completes
-        setTimeout(() => {
-            overlay.style.display = 'none';
-        }, 500);  // Match the transition duration
-    }
-
-    /**
-     * Shows an overlay when Board 1 loses (but board 2 is still active)
-     * Player can pay 50 points to reset board 1 with full AI upgrades
-     */
-    function showBoard1LostOverlay(): void {
-        // Create the overlay that dims board 1
-        const overlay = document.createElement('div');
-        overlay.id = 'board-1-lost-overlay';
-        
-        // Style the overlay - covers just board 1 area
-        overlay.style.position = 'absolute';
-        overlay.style.top = '0';
-        overlay.style.left = '0';
-        overlay.style.width = '100%';
-        overlay.style.height = '100%';
-        overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
-        overlay.style.display = 'flex';
-        overlay.style.flexDirection = 'column';
-        overlay.style.justifyContent = 'center';
-        overlay.style.alignItems = 'center';
-        overlay.style.zIndex = '100';
-        overlay.style.borderRadius = '12px';
-        
-        // Create the "Board 1 Lost" title
-        const title = document.createElement('h2');
-        title.textContent = 'BOARD 1 LOST';
-        title.style.color = '#ff4444';
-        title.style.fontSize = '20px';
-        title.style.margin = '0 0 15px 0';
-        title.style.fontFamily = 'Arial, sans-serif';
-        title.style.textShadow = '1px 1px 4px rgba(255,68,68,0.5)';
-        
-        // Create info text
-        const infoText = document.createElement('p');
-        infoText.style.color = '#aaa';
-        infoText.style.fontSize = '12px';
-        infoText.style.margin = '0 0 15px 0';
-        infoText.style.textAlign = 'center';
-        infoText.style.padding = '0 10px';
-        infoText.innerHTML = 'Pay to restart with<br>max AI speed + hard drop';
-        
-        // Create the Reset button
-        const resetButton = document.createElement('button');
-        resetButton.id = 'reset-board-1-button';
-        resetButton.textContent = `Reset (${RESET_BOARD_1_COST} pts)`;
-        resetButton.style.padding = '10px 20px';
-        resetButton.style.fontSize = '14px';
-        resetButton.style.fontWeight = 'bold';
-        resetButton.style.backgroundColor = points >= RESET_BOARD_1_COST ? '#4CAF50' : '#888888';
-        resetButton.style.color = 'white';
-        resetButton.style.border = 'none';
-        resetButton.style.borderRadius = '8px';
-        resetButton.style.cursor = points >= RESET_BOARD_1_COST ? 'pointer' : 'not-allowed';
-        resetButton.style.transition = 'all 0.3s ease';
-        resetButton.disabled = points < RESET_BOARD_1_COST;
-        
-        // Add hover effect for the reset button
-        resetButton.addEventListener('mouseenter', () => {
-            if (!resetButton.disabled) {
-                resetButton.style.backgroundColor = '#45a049';
-                resetButton.style.transform = 'scale(1.05)';
-            }
-        });
-        
-        resetButton.addEventListener('mouseleave', () => {
-            resetButton.style.backgroundColor = resetButton.disabled ? '#888888' : '#4CAF50';
-            resetButton.style.transform = 'scale(1)';
-        });
-        
-        // Add click handler to reset board 1
-        resetButton.addEventListener('click', () => {
-            if (points >= RESET_BOARD_1_COST) {
-                resetBoard1WithUpgrades();
-            }
-        });
-        
-        // Assemble the overlay
-        overlay.appendChild(title);
-        overlay.appendChild(infoText);
-        overlay.appendChild(resetButton);
-        
-        // Add overlay to board 1 container
-        const board1Container = document.getElementById('board-1-container');
-        if (board1Container) {
-            // Make board 1 container relative so overlay positions correctly
-            board1Container.style.position = 'relative';
-            board1Container.appendChild(overlay);
-        }
-        
-        console.log("Board 1 lost overlay shown. Cost to reset:", RESET_BOARD_1_COST);
-    }
-    
-    /**
-     * Updates the Board 1 Lost overlay button state
-     * Called when points change to enable/disable the reset button
-     */
-    function updateBoard1LostOverlay(): void {
-        const resetButton = document.getElementById('reset-board-1-button') as HTMLButtonElement;
-        if (!resetButton) return;
-        
-        // Update button state based on current points
-        const canAfford = points >= RESET_BOARD_1_COST;
-        resetButton.disabled = !canAfford;
-        resetButton.style.backgroundColor = canAfford ? '#4CAF50' : '#888888';
-        resetButton.style.cursor = canAfford ? 'pointer' : 'not-allowed';
-    }
-    
-    /**
-     * Resets Board 1 with full AI upgrades (max speed + hard drop)
-     * Called when player pays 50 points after board 1 loses
-     */
-    function resetBoard1WithUpgrades(): void {
-        // Deduct the cost
-        points -= RESET_BOARD_1_COST;
-        
-        // Remove the "Board 1 Lost" overlay
-        const overlay = document.getElementById('board-1-lost-overlay');
-        if (overlay) {
-            overlay.remove();
-        }
-        
-        // Reset board 1 game state
-        isGameOver = false;
-        currentPiece = null;
-        nextPiece = null;
-        totalLinesCleared = 0;
-        
-        // Reset board 1 to a clean state
-        initializeBoard();
-        
-        // Set up board 1 with FULL AI upgrades (this is the reward for paying)
-        aiPlayerHired = true;
-        aiEnabled = true;
-        aiHardDropUnlocked = true;
-        aiSpeedLevel = MAX_AI_SPEED_UPGRADES;  // Max speed level
-        aiSpeed = BASE_AI_SPEED / Math.pow(1.5, MAX_AI_SPEED_UPGRADES);  // Calculate max speed
-        
-        // Reset AI movement state
-        aiTargetPosition = null;
-        aiMoving = false;
-        aiLastMoveTime = 0;
-        
-        // Reset timing
-        lastDropTime = performance.now();
-        
-        // Spawn first piece
-        spawnNewPiece();
-        
-        // Update all displays
-        updatePointsDisplay();
-        updateBoardStatus(1);
-        
-        // Visual feedback - green flash
-        const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
-        if (canvas) {
-            canvas.style.transition = 'box-shadow 0.5s ease';
-            canvas.style.boxShadow = '0 0 40px rgba(76,175,80,0.8)';
-            
-            setTimeout(() => {
-                canvas.style.boxShadow = '0 0 20px rgba(0,0,0,0.3)';
-            }, 500);
-        }
-        
-        console.log("Board 1 reset with full AI upgrades!");
-    }
-
-    /**
-     * Resets the entire game to starting state
-     * Called when player clicks "Play Again" button
-     */
-    function resetGame(): void {
-    console.log("Resetting game...");
-    
-    // Hide the game over screen
-    hideGameOverScreen();
-    
-    // Reset game state for board 1
-    isGameOver = false;
-    currentPiece = null;
-    nextPiece = null;
-    
-    // Reset scores and stats
-    points = 0;
-    totalLinesCleared = 0;
-    
-    // Reset all global / board 1 upgrades & AI
-    hardDropUnlocked = false;
-    aiPlayerHired = false;
-    aiEnabled = false;
-    aiHardDropUnlocked = false;
-    aiSpeedLevel = 0;
-    aiSpeed = BASE_AI_SPEED;  // Reset to base speed
-    forceNextPieceUnlocked = false;  // Reset force next piece upgrade
-    
-    // Reset AI state for board 1
-    aiTargetPosition = null;
-    aiMoving = false;
-    aiLastMoveTime = 0;
-    
-    // If a second board exists, fully reset and remove it
-    if (secondBoardUnlocked) {
-        resetSecondBoard();
-    }
-    
-    // Player should control board 1 again
-    activePlayerBoard = 1;
-    updateBoardStatus(1);
-    
-    // Clear the board completely (board 1)
-    initializeBoard();
-    
-    // Reset timing
-    lastDropTime = performance.now();
-    
-    // Update all UI elements to reflect reset state
-    updatePointsDisplay();
-    updateControlsDisplay();
-    
-    // Spawn the first piece for the new game
-    spawnNewPiece();
-    
-    // Visual feedback - quick green flash on the canvas
-    const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
-    if (canvas) {
-        canvas.style.transition = 'box-shadow 0.3s ease';
-        canvas.style.boxShadow = '0 0 30px rgba(76,175,80,0.6)';
-        
-        setTimeout(() => {
-            canvas.style.boxShadow = '0 0 20px rgba(0,0,0,0.3)';
-        }, 300);
-    }
-    
-    console.log("Game reset complete! Good luck!");
-}
-
-    // Call createUI after the canvas is set up
-    createUI();
-
-    // Move the canvas into the board 1 container
-    const board1Container = document.getElementById('board-1-container');
-    if (board1Container) {
-        // Remove old positioning styles
-        canvas.style.position = '';
-        canvas.style.left = '';
-        canvas.style.top = '';
-        canvas.style.transform = '';
-        
-        // Add the canvas to the board container
-        board1Container.insertBefore(canvas, board1Container.firstChild);
-    }
-
-    // Create the Game Over screen (hidden by default)
-    createGameOverScreen();
-
-    // INITIALIZE THE BOARD STATE
-    // Create an empty board - a 2D array filled with null values
-    // This represents no blocks on the board initially
-    function initializeBoard(): void {
-        // Create a new empty array for the board
-        boardState = [];
-        
-        // For each row in our grid...
-        for (let row = 0; row < GRID_HEIGHT; row++) {
-            // Create a new row array
-            const newRow: (string | null)[] = [];
-            
-            // For each column in our grid...
-            for (let col = 0; col < GRID_WIDTH; col++) {
-                // Add an empty cell (null means no block here)
-                newRow.push(null);
-            }
-            
-            // Add this completed row to our board
-            boardState.push(newRow);
-        }
-    }
-
-    /**
- * Initializes board state for a specific board
- */
-function initializeBoardState(boardNumber: number): void {
-    const newBoardState = [];
-    
-    for (let row = 0; row < GRID_HEIGHT; row++) {
-        const newRow: (string | null)[] = [];
-        for (let col = 0; col < GRID_WIDTH; col++) {
-            newRow.push(null);
-        }
-        newBoardState.push(newRow);
-    }
-    
-    if (boardNumber === 2) {
-        boardStateBoard2 = newBoardState;
-        lastDropTimeBoard2 = performance.now();
-    } else if (boardNumber === 3) {
-        boardStateBoard3 = newBoardState;
-        lastDropTimeBoard3 = performance.now();
-    } else {
-        boardState = newBoardState;
-        lastDropTime = performance.now();
-    }
-}
-
-    // PIECE CREATION FUNCTIONS
-
-    /**
-     * Creates a new piece using the "next piece" system
-     * The piece that was "next" becomes current, and a new "next" is generated
-     */
-    function spawnNewPiece(): void {
-        // If there's no next piece yet (game just started), generate one
-        if (nextPiece === null) {
-            const pieceTypes = Object.keys(PIECES) as PieceType[];
-            nextPiece = pieceTypes[Math.floor(Math.random() * pieceTypes.length)];
-        }
-        
-        // Use the next piece as the current piece
-        const pieceType = nextPiece;
-        
-        // Create the new piece object
-        currentPiece = {
-            type: pieceType,
-            shape: PIECES[pieceType],
-            x: Math.floor(GRID_WIDTH / 2) - 1,
-            y: 0,
-            color: PIECE_COLORS[pieceType]
-        };
-        
-        // Check if the new piece immediately collides (game over for this board)
-        if (checkCollision()) {
-            // Board 1 lost - set game over state for board 1
-            isGameOver = true;
-            currentPiece = null;
-            
-            // Disable AI if it was running on board 1
-            if (aiEnabled) {
-                aiEnabled = false;
-                aiTargetPosition = null;
-                aiMoving = false;
-            }
-            
-            // If board 2 is unlocked, board 1 losing is NOT a full game over
-            // Player can pay to reset board 1
-            if (secondBoardUnlocked) {
-                console.log("Board 1 lost! Player can pay to reset it.");
-                // Show the "Board 1 Lost" overlay instead of full game over
-                showBoard1LostOverlay();
-            } else {
-                // Board 2 not unlocked yet - this is a full game over
-                showGameOverScreen();
-                console.log("GAME OVER! Pieces reached the top.");
-            }
-            return;
-        }
-        
-        // Generate the next piece
-        const pieceTypes = Object.keys(PIECES) as PieceType[];
-        nextPiece = pieceTypes[Math.floor(Math.random() * pieceTypes.length)];
-        
-        // Update the preview display
-        updateNextPiecePreview(1);
-        
-        // Reset AI state so it can calculate a move for the new piece
-        aiTargetPosition = null;
-        aiMoving = false;
-        
-        // For debugging
-        console.log(`Spawned piece: ${pieceType}, Next piece: ${nextPiece}`);
-    }
-
-    /**
- * Spawns a new piece for board 2
- */
-function spawnNewPieceBoard2(): void {
-    // If there's no next piece yet (game just started), generate one
-    if (nextPieceBoard2 === null) {
-        const pieceTypes = Object.keys(PIECES) as PieceType[];
-        nextPieceBoard2 = pieceTypes[Math.floor(Math.random() * pieceTypes.length)];
-    }
-    
-    // Use the next piece as the current piece
-    const pieceType = nextPieceBoard2;
-    
-    // Create the new piece object
-    currentPieceBoard2 = {
-        type: pieceType,
-        shape: PIECES[pieceType],
-        x: Math.floor(GRID_WIDTH / 2) - 1,
-        y: 0,
-        color: PIECE_COLORS[pieceType]
-    };
-    
-    // Check if the new piece immediately collides (game over)
-    if (checkCollisionBoard2()) {
-        // GAME OVER for board 2!
-        isGameOverBoard2 = true;
-        currentPieceBoard2 = null;
-        
-        // Disable AI if it was running on board 2
-        if (aiEnabledBoard2) {
-            aiEnabledBoard2 = false;
-        }
-        
-        console.log("GAME OVER on Board 2!");
-        
-        // Board 2 is the active player board, so losing it means full game over
-        // This is the ONLY way to trigger game over once board 2 exists
-        showGameOverScreen();
-        return;
-    }
-    
-    // Generate the next piece
-    const pieceTypes = Object.keys(PIECES) as PieceType[];
-    nextPieceBoard2 = pieceTypes[Math.floor(Math.random() * pieceTypes.length)];
-    
-    // Update the preview display
-    updateNextPiecePreview(2);
-    
-    console.log(`Board 2: Spawned piece: ${pieceType}, Next piece: ${nextPieceBoard2}`);
-}
-/**
- * Checks collision for board 2's current piece
- */
-function checkCollisionBoard2(): boolean {
-    if (!currentPieceBoard2) return false;
-    
-    for (let row = 0; row < currentPieceBoard2.shape.length; row++) {
-        for (let col = 0; col < currentPieceBoard2.shape[row].length; col++) {
-            if (!currentPieceBoard2.shape[row][col]) continue;
-            
-            const boardX = currentPieceBoard2.x + col;
-            const boardY = currentPieceBoard2.y + row;
-            
-            if (boardX < 0 || boardX >= GRID_WIDTH || boardY >= GRID_HEIGHT) {
-                return true;
-            }
-            
-            if (boardY >= 0 && boardStateBoard2[boardY][boardX]) {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
-    /**
-     * Rotates a piece shape 90 degrees clockwise
-     * We'll use this later for piece rotation
-     * @param shape - The 2D array representing the piece
-     * @returns A new 2D array that's the rotated version
-     */
-    function rotateShape(shape: number[][]): number[][] {
-        // Get the size of the shape (assumes square matrix)
-        const size = shape.length;
-        
-        // Create a new array for the rotated shape
-        const rotated: number[][] = [];
-        
-        // Initialize the rotated array with empty rows
-        for (let i = 0; i < size; i++) {
-            rotated.push(new Array(size).fill(0));
-        }
-        
-        // Rotation algorithm: 
-        // To rotate 90° clockwise, the element at [row][col] moves to [col][size-1-row]
-        for (let row = 0; row < size; row++) {
-            for (let col = 0; col < size; col++) {
-                rotated[col][size - 1 - row] = shape[row][col];
-            }
-        }
-        
-        return rotated;
-    }
-
-    // DRAWING FUNCTIONS - These functions handle all our visual rendering
-
-    /**
- * Draws the main game board
- * This creates the black background with grey grid lines
- */
-function drawBoard(): void {
-    // Determine if we should use small size for board 1
-    const useSmallSize = secondBoardUnlocked;
-    const cellSize = useSmallSize ? CELL_SIZE_SMALL : CELL_SIZE;
-    const padding = useSmallSize ? PADDING_SMALL : PADDING;
-    const boardWidth = useSmallSize ? BOARD_WIDTH_SMALL : BOARD_WIDTH;
-    const boardHeight = useSmallSize ? BOARD_HEIGHT_SMALL : BOARD_HEIGHT;
-    
-    // Resize canvas if needed (only happens once when board 2 is unlocked)
-    if (useSmallSize && canvas.width !== boardWidth + (padding * 2)) {
-        canvas.width = boardWidth + (padding * 2);
-        canvas.height = boardHeight + (padding * 2);
-    }
-    
-    // First, clear everything on the canvas
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    // Draw the black background for the game board
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(padding, padding, boardWidth, boardHeight);
-    
-    // Now draw the grid lines
-    ctx.strokeStyle = '#3b3b3bff';
-    ctx.lineWidth = 1;
-    
-    // Draw vertical lines (columns)
-    for (let col = 0; col <= GRID_WIDTH; col++) {
-        const x = padding + (col * cellSize);
-        ctx.beginPath();
-        ctx.moveTo(x, padding);
-        ctx.lineTo(x, padding + boardHeight);
-        ctx.stroke();
-    }
-    
-    // Draw horizontal lines (rows)
-    for (let row = 0; row <= GRID_HEIGHT; row++) {
-        const y = padding + (row * cellSize);
-        ctx.beginPath();
-        ctx.moveTo(padding, y);
-        ctx.lineTo(padding + boardWidth, y);
-        ctx.stroke();
-    }
-    
-    // Draw a border around the entire board
-    ctx.strokeStyle = '#666666';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(padding, padding, boardWidth, boardHeight);
-}
-
-    // PIECE DRAWING FUNCTIONS - These make our pieces visible on screen
-
-    /**
- * Draws a single block
- * This is the building block (pun intended!) for drawing pieces
- * @param x - The x position in grid units (0-9 for our board)
- * @param y - The y position in grid units (0-19 for our board)
- * @param color - The color to fill this block with
- */
-function drawBlock(x: number, y: number, color: string): void {
-    // Use smaller cell size if board 2 is unlocked
-    const useSmallSize = secondBoardUnlocked;
-    const cellSize = useSmallSize ? CELL_SIZE_SMALL : CELL_SIZE;
-    const padding = useSmallSize ? PADDING_SMALL : PADDING;
-    
-    // Convert grid coordinates to pixel coordinates
-    const pixelX = padding + (x * cellSize);
-    const pixelY = padding + (y * cellSize);
-    
-    // Set the fill color for this block
-    ctx.fillStyle = color;
-    
-    // Draw the main block square
-    ctx.fillRect(pixelX, pixelY, cellSize, cellSize);
-    
-    // Add a subtle 3D effect with borders
-    // Lighter border on top and left (gives "raised" appearance)
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-    ctx.lineWidth = useSmallSize ? 1 : 2;  // Thinner lines for smaller blocks
-    ctx.beginPath();
-    ctx.moveTo(pixelX, pixelY + cellSize);
-    ctx.lineTo(pixelX, pixelY);
-    ctx.lineTo(pixelX + cellSize, pixelY);
-    ctx.stroke();
-    
-    // Darker border on bottom and right (gives "shadow" appearance)
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
-    ctx.beginPath();
-    ctx.moveTo(pixelX + cellSize, pixelY);
-    ctx.lineTo(pixelX + cellSize, pixelY + cellSize);
-    ctx.lineTo(pixelX, pixelY + cellSize);
-    ctx.stroke();
-}
-
-    /**
-     * Draws the currently falling piece
-     * Goes through the piece's shape array and draws each block
-     */
-    function drawCurrentPiece(): void {
-        // First check if there actually is a current piece
-        if (!currentPiece) return;  // Exit early if no piece exists
-        
-        // Loop through each row of the piece's shape
-        for (let row = 0; row < currentPiece.shape.length; row++) {
-            // Loop through each column of the piece's shape
-            for (let col = 0; col < currentPiece.shape[row].length; col++) {
-                // Check if there's a block at this position (1 means block, 0 means empty)
-                if (currentPiece.shape[row][col]) {
-                    // Calculate where this block should be drawn on the board
-                    // We add the piece's position to the block's position within the piece
-                    const boardX = currentPiece.x + col;
-                    const boardY = currentPiece.y + row;
-                    
-                    // Draw this block with the piece's color
-                    drawBlock(boardX, boardY, currentPiece.color);
-                }
-            }
-        }
-    }
-
-    /**
-     * Draws all the locked pieces on the board
-     * These are pieces that have already landed and can't move anymore
-     */
-    function drawBoardState(): void {
-        // Loop through every cell in our board
-        for (let row = 0; row < GRID_HEIGHT; row++) {
-            for (let col = 0; col < GRID_WIDTH; col++) {
-                // Check if there's a block at this position
-                const blockColor = boardState[row][col];
-                
-                // If there's a color stored here, draw a block
-                if (blockColor) {
-                    drawBlock(col, row, blockColor);
-                }
-            }
-        }
-    }
-
-    /**
- * Draws board 2's game board
- */
-function drawBoard2(): void {
-    const canvas2 = document.getElementById('game-canvas-2') as HTMLCanvasElement;
-    if (!canvas2) return;
-
-    const ctx2 = canvas2.getContext('2d');
-    if (!ctx2) return;
-
-    // Use small size for board 2 once the third board is unlocked
-    const useSmallSize = thirdBoardUnlocked;
-    const cellSize = useSmallSize ? CELL_SIZE_SMALL : CELL_SIZE;
-    const padding = useSmallSize ? PADDING_SMALL : PADDING;
-    const boardWidth = useSmallSize ? BOARD_WIDTH_SMALL : BOARD_WIDTH;
-    const boardHeight = useSmallSize ? BOARD_HEIGHT_SMALL : BOARD_HEIGHT;
-
-    // Resize canvas if needed (mirrors board 1 logic)
-    if (useSmallSize && canvas2.width !== boardWidth + (padding * 2)) {
-        canvas2.width = boardWidth + (padding * 2);
-        canvas2.height = boardHeight + (padding * 2);
-    }
-
-    // Clear the canvas
-    ctx2.clearRect(0, 0, canvas2.width, canvas2.height);
-
-    // Background
-    ctx2.fillStyle = '#000000';
-    ctx2.fillRect(padding, padding, boardWidth, boardHeight);
-
-    // Grid
-    ctx2.strokeStyle = '#3b3b3bff';
-    ctx2.lineWidth = 1;
-
-    // Vertical lines
-    for (let col = 0; col <= GRID_WIDTH; col++) {
-        const x = padding + (col * cellSize);
-        ctx2.beginPath();
-        ctx2.moveTo(x, padding);
-        ctx2.lineTo(x, padding + boardHeight);
-        ctx2.stroke();
-    }
-
-    // Horizontal lines
-    for (let row = 0; row <= GRID_HEIGHT; row++) {
-        const y = padding + (row * cellSize);
-        ctx2.beginPath();
-        ctx2.moveTo(padding, y);
-        ctx2.lineTo(padding + boardWidth, y);
-        ctx2.stroke();
-    }
-
-    // Border
-    ctx2.strokeStyle = '#666666';
-    ctx2.lineWidth = useSmallSize ? 1 : 2;
-    ctx2.strokeRect(padding, padding, boardWidth, boardHeight);
-}
-
-
-/**
- * Draws a block on board 2
- */
-function drawBlockBoard2(x: number, y: number, color: string): void {
-    const canvas2 = document.getElementById('game-canvas-2') as HTMLCanvasElement;
-    if (!canvas2) return;
-
-    const ctx2 = canvas2.getContext('2d');
-    if (!ctx2) return;
-
-    // Small mode when the third board is unlocked
-    const useSmallSize = thirdBoardUnlocked;
-    const cellSize = useSmallSize ? CELL_SIZE_SMALL : CELL_SIZE;
-    const padding = useSmallSize ? PADDING_SMALL : PADDING;
-
-    const pixelX = padding + (x * cellSize);
-    const pixelY = padding + (y * cellSize);
-
-    // Main block
-    ctx2.fillStyle = color;
-    ctx2.fillRect(pixelX, pixelY, cellSize, cellSize);
-
-    // Light border
-    ctx2.strokeStyle = "rgba(255, 255, 255, 0.3)";
-    ctx2.lineWidth = useSmallSize ? 1 : 2;
-    ctx2.beginPath();
-    ctx2.moveTo(pixelX, pixelY + cellSize);
-    ctx2.lineTo(pixelX, pixelY);
-    ctx2.lineTo(pixelX + cellSize, pixelY);
-    ctx2.stroke();
-
-    // Dark border
-    ctx2.strokeStyle = "rgba(0, 0, 0, 0.3)";
-    ctx2.beginPath();
-    ctx2.moveTo(pixelX + cellSize, pixelY);
-    ctx2.lineTo(pixelX + cellSize, pixelY + cellSize);
-    ctx2.lineTo(pixelX, pixelY + cellSize);
-    ctx2.stroke();
-}
-
-
-/**
- * Draws board 2's current piece
- */
-function drawCurrentPieceBoard2(): void {
-    if (!currentPieceBoard2) return;
-    
-    for (let row = 0; row < currentPieceBoard2.shape.length; row++) {
-        for (let col = 0; col < currentPieceBoard2.shape[row].length; col++) {
-            if (currentPieceBoard2.shape[row][col]) {
-                const boardX = currentPieceBoard2.x + col;
-                const boardY = currentPieceBoard2.y + row;
-                drawBlockBoard2(boardX, boardY, currentPieceBoard2.color);
-            }
-        }
-    }
-}
-
-/**
- * Draws board 2's locked pieces
- */
-function drawBoardStateBoard2(): void {
-    for (let row = 0; row < GRID_HEIGHT; row++) {
-        for (let col = 0; col < GRID_WIDTH; col++) {
-            const blockColor = boardStateBoard2[row][col];
-            if (blockColor) {
-                drawBlockBoard2(col, row, blockColor);
-            }
-        }
-    }
-}
-
-    /**
-     * Updates the next piece preview display
-     * Now supports multiple boards
-     */
-    function updateNextPiecePreview(boardNumber: number = 1): void {
-    const previewCanvas = document.getElementById(`next-piece-canvas-${boardNumber}`) as HTMLCanvasElement;
-    
-    // Determine which next piece to show
-    let pieceToShow: PieceType | null;
-    if (boardNumber === 1) {
-        pieceToShow = nextPiece;
-    } else if (boardNumber === 2) {
-        pieceToShow = nextPieceBoard2;
-    } else {
-        pieceToShow = nextPieceBoard3;
-    }
-    
-    if (!previewCanvas || !pieceToShow) return;
-    
-    const previewCtx = previewCanvas.getContext('2d');
-    if (!previewCtx) return;
-    
-    // Clear the preview canvas
-    previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
-    
-    // Fill background
-    previewCtx.fillStyle = '#000000';
-    previewCtx.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
-    
-    // Get the piece shape
-    const shape = PIECES[pieceToShow];
-    const color = PIECE_COLORS[pieceToShow];
-        
-        // Calculate centering offset
-        const blockSize = 20;  // Smaller blocks for preview
-        const shapeWidth = shape[0].length;
-        const shapeHeight = shape.length;
-        
-        // Center the piece in the preview
-        const offsetX = (previewCanvas.width - (shapeWidth * blockSize)) / 2;
-        const offsetY = (previewCanvas.height - (shapeHeight * blockSize)) / 2;
-        
-        // Draw the piece
-        for (let row = 0; row < shape.length; row++) {
-            for (let col = 0; col < shape[row].length; col++) {
-                if (shape[row][col]) {
-                    const x = offsetX + (col * blockSize);
-                    const y = offsetY + (row * blockSize);
-                    
-                    // Draw block
-                    previewCtx.fillStyle = color;
-                    previewCtx.fillRect(x, y, blockSize, blockSize);
-                    
-                    // Draw 3D effect borders
-                    // Light border (top-left)
-                    previewCtx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-                    previewCtx.lineWidth = 1;
-                    previewCtx.beginPath();
-                    previewCtx.moveTo(x, y + blockSize);
-                    previewCtx.lineTo(x, y);
-                    previewCtx.lineTo(x + blockSize, y);
-                    previewCtx.stroke();
-                    
-                    // Dark border (bottom-right)
-                    previewCtx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
-                    previewCtx.beginPath();
-                    previewCtx.moveTo(x + blockSize, y);
-                    previewCtx.lineTo(x + blockSize, y + blockSize);
-                    previewCtx.lineTo(x, y + blockSize);
-                    previewCtx.stroke();
-                }
-            }
-        }
-        
-        // Draw grid lines for style
-        previewCtx.strokeStyle = '#333333';
-        previewCtx.lineWidth = 0.5;
-        previewCtx.strokeRect(0, 0, previewCanvas.width, previewCanvas.height);
-
-        // Update force next piece icons since next piece changed
-        updateForceNextPieceUI(boardNumber);
-    }
-
-    // PIECE MOVEMENT FUNCTIONS - These handle how pieces fall and move
-
-    /**
-     * Moves the current piece down by one row
-     * This is what makes pieces "fall"
-     * @returns true if the move was successful, false if it hit something
-     */
-    function movePieceDown(): boolean {
-        // Check if there's a piece to move
-        if (!currentPiece) return false;
-        
-        // Try moving the piece down by incrementing its y position
-        currentPiece.y++;
-        
-        // Check if this new position is valid (not colliding with anything)
-        if (checkCollision()) {
-            // Oops! The piece hit something. Move it back up
-            currentPiece.y--;
-            
-            // The piece can't move down anymore, so we should lock it in place
-            lockPiece();
-            
-            // Spawn a new piece for the player to control
-            spawnNewPiece();
-            
-            // Return false to indicate the move failed
-            return false;
-        }
-        
-        // Move was successful!
-        return true;
-    }
-    /**
-     * Moves the current piece left or right
-     * @param direction - Either -1 for left or 1 for right
-     * @returns true if the move was successful
-     */
-    function movePieceHorizontally(direction: number): boolean {
-        // Safety check
-        if (!currentPiece) return false;
-        
-        // Store the original position in case we need to revert
-        const originalX = currentPiece.x;
-        
-        // Move the piece in the specified direction
-        currentPiece.x += direction;
-        
-        // Check if this new position is valid
-        if (checkCollision()) {
-            // Hit something! Revert the move
-            currentPiece.x = originalX;
-            return false;
-        }
-        
-        // Move was successful
-        return true;
-    }
-
-    /**
-     * Rotates the current piece 90 degrees clockwise
-     * Uses "wall kicks" - if rotation fails, tries nearby positions
-     * @returns true if rotation was successful
-     */
-    function rotatePiece(): boolean {
-        // Safety check
-        if (!currentPiece) return false;
-        
-        // Don't rotate the O-piece (the square) - it looks the same in all orientations
-        if (currentPiece.type === 'O') return false;
-        
-        // Store the original shape in case we need to revert
-        const originalShape = currentPiece.shape;
-        
-        // Rotate the shape 90 degrees clockwise
-        currentPiece.shape = rotateShape(currentPiece.shape);
-        
-        // Check if the rotated piece fits in its current position
-        if (!checkCollision()) {
-            // Rotation successful!
-            return true;
-        }
-        
-        // WALL KICKS - Try to find a nearby position where the piece fits
-        // This makes the game feel better when rotating near walls
-        
-        // Try moving left
-        currentPiece.x -= 1;
-        if (!checkCollision()) return true;  // Found a valid position!
-        
-        // That didn't work, try moving right instead (2 spaces from original)
-        currentPiece.x += 2;
-        if (!checkCollision()) return true;
-        
-        // Try moving back to center but up one row
-        currentPiece.x -= 1;  // Back to original X
-        currentPiece.y -= 1;  // Up one row
-        if (!checkCollision()) return true;
-        
-        // Nothing worked - revert everything
-        currentPiece.y += 1;  // Back to original Y
-        currentPiece.shape = originalShape;  // Back to original shape
-        return false;
-    }
-
-    /**
-     * Instantly drops the piece to the bottom (hard drop)
-     * Gives players quick placement and usually bonus points
-     */
-    function hardDrop(): void {
-        // Safety check
-        if (!currentPiece) return;
-        
-        // Keep moving down until we hit something
-        while (!checkCollision()) {
-            currentPiece.y++;
-        }
-        
-        // We went one step too far, move back up
-        currentPiece.y--;
-        
-        // Lock the piece immediately
-        lockPiece();
-        
-        // Spawn a new piece
-        spawnNewPiece();
-        
-        // Reset the drop timer so the new piece doesn't immediately fall
-        lastDropTime = performance.now();
-    }
-
-    /**
-     * Checks if the current piece is colliding with walls, floor, or other pieces
-     * This is crucial for game logic - pieces can't phase through things!
-     * @returns true if there's a collision, false if position is valid
-     */
-    function checkCollision(): boolean {
-        // Safety check
-        if (!currentPiece) return false;
-        
-        // Check each block in the current piece
-        for (let row = 0; row < currentPiece.shape.length; row++) {
-            for (let col = 0; col < currentPiece.shape[row].length; col++) {
-                // Skip empty spaces in the piece shape
-                if (!currentPiece.shape[row][col]) continue;
-                
-                // Calculate where this block is on the board
-                const boardX = currentPiece.x + col;
-                const boardY = currentPiece.y + row;
-                
-                // Check if the block is outside the board boundaries
-                // Left wall check
-                if (boardX < 0) return true;
-                
-                // Right wall check
-                if (boardX >= GRID_WIDTH) return true;
-                
-                // Floor check (bottom of board)
-                if (boardY >= GRID_HEIGHT) return true;
-                
-                // Check if there's already a locked block at this position
-                // We only check this if we're not above the board (during spawn)
-                if (boardY >= 0 && boardState[boardY][boardX]) {
-                    return true;
-                }
-            }
-        }
-        
-        // No collision detected - the position is valid!
-        return false;
-    }
-
-    /**
-     * Locks the current piece in place on the board
-     * Now also checks for line clears!
-     */
-    function lockPiece(): void {
-        // Safety check
-        if (!currentPiece) return;
-        
-        // Add each block of the piece to the board state
-        for (let row = 0; row < currentPiece.shape.length; row++) {
-            for (let col = 0; col < currentPiece.shape[row].length; col++) {
-                // Only process actual blocks (not empty spaces)
-                if (currentPiece.shape[row][col]) {
-                    // Calculate board position
-                    const boardX = currentPiece.x + col;
-                    const boardY = currentPiece.y + row;
-                    
-                    // Make sure we're within bounds before locking
-                    if (boardY >= 0) {
-                        // Store this block's color in the board state
-                        boardState[boardY][boardX] = currentPiece.color;
-                    }
-                }
-            }
-        }
-        
-        // Clear the current piece (it's now part of the board)
-        currentPiece = null;
-        
-        // Check for and clear any completed lines
-        clearLines();
-    }
-
-    /**
- * Moves board 2's piece down by one row
- */
-function movePieceDownBoard2(): boolean {
-    if (!currentPieceBoard2) return false;
-    
-    currentPieceBoard2.y++;
-    
-    if (checkCollisionBoard2()) {
-        currentPieceBoard2.y--;
-        lockPieceBoard2();
-        spawnNewPieceBoard2();
-        return false;
-    }
-    
-    return true;
-}
-
-/**
- * Moves board 2's piece horizontally
- */
-function movePieceHorizontallyBoard2(direction: number): boolean {
-    if (!currentPieceBoard2) return false;
-    
-    const originalX = currentPieceBoard2.x;
-    currentPieceBoard2.x += direction;
-    
-    if (checkCollisionBoard2()) {
-        currentPieceBoard2.x = originalX;
-        return false;
-    }
-    
-    return true;
-}
-
-/**
- * Rotates board 2's piece
- */
-function rotatePieceBoard2(): boolean {
-    if (!currentPieceBoard2) return false;
-    
-    if (currentPieceBoard2.type === 'O') return false;
-    
-    const originalShape = currentPieceBoard2.shape;
-    currentPieceBoard2.shape = rotateShape(currentPieceBoard2.shape);
-    
-    if (!checkCollisionBoard2()) {
-        return true;
-    }
-    
-    // Wall kicks
-    currentPieceBoard2.x -= 1;
-    if (!checkCollisionBoard2()) return true;
-    
-    currentPieceBoard2.x += 2;
-    if (!checkCollisionBoard2()) return true;
-    
-    currentPieceBoard2.x -= 1;
-    currentPieceBoard2.y -= 1;
-    if (!checkCollisionBoard2()) return true;
-    
-    // Revert
-    currentPieceBoard2.y += 1;
-    currentPieceBoard2.shape = originalShape;
-    return false;
-}
-
-/**
- * Hard drops board 2's piece
- */
-function hardDropBoard2(): void {
-    if (!currentPieceBoard2) return;
-    
-    while (!checkCollisionBoard2()) {
-        currentPieceBoard2.y++;
-    }
-    
-    currentPieceBoard2.y--;
-    lockPieceBoard2();
-    spawnNewPieceBoard2();
-    lastDropTimeBoard2 = performance.now();
-}
-
-/**
- * Locks board 2's piece in place
- */
-function lockPieceBoard2(): void {
-    if (!currentPieceBoard2) return;
-    
-    for (let row = 0; row < currentPieceBoard2.shape.length; row++) {
-        for (let col = 0; col < currentPieceBoard2.shape[row].length; col++) {
-            if (currentPieceBoard2.shape[row][col]) {
-                const boardX = currentPieceBoard2.x + col;
-                const boardY = currentPieceBoard2.y + row;
-                
-                if (boardY >= 0) {
-                    boardStateBoard2[boardY][boardX] = currentPieceBoard2.color;
-                }
-            }
-        }
-    }
-    
-    currentPieceBoard2 = null;
-    clearLinesBoard2();
-}
-
-/**
- * Clears completed lines on board 2
- */
-function clearLinesBoard2(): number {
-    let linesCleared = 0;
-    
-    for (let row = GRID_HEIGHT - 1; row >= 0; row--) {
-        let isLineFull = true;
-        
-        for (let col = 0; col < GRID_WIDTH; col++) {
-            if (!boardStateBoard2[row][col]) {
-                isLineFull = false;
-                break;
-            }
-        }
-        
-        if (isLineFull) {
-            boardStateBoard2.splice(row, 1);
-            const newRow: (string | null)[] = new Array(GRID_WIDTH).fill(null);
-            boardStateBoard2.unshift(newRow);
-            linesCleared++;
-            row++;  // Check the same row again
-        }
-    }
-    
-    if (linesCleared > 0) {
-        console.log(`Board 2: Cleared ${linesCleared} line(s)!`);
-        
-        // Add to global points
-        points += linesCleared;
-        totalLinesClearedBoard2 += linesCleared;
-        
-        // Update displays
-        updatePointsDisplay();
-        
-        // Update board 2's lines display
-        const board2LinesElement = document.getElementById('board-2-lines');
-        if (board2LinesElement) {
-            board2LinesElement.textContent = totalLinesClearedBoard2.toString();
-        }
-        
-        // Flash effect for board 2
-        const canvas2 = document.getElementById('game-canvas-2') as HTMLCanvasElement;
-        if (canvas2) {
-            const originalFilter = canvas2.style.filter;
-            const brightness = 1 + (linesCleared * 0.3);
-            canvas2.style.filter = `brightness(${brightness})`;
-            setTimeout(() => {
-                canvas2.style.filter = originalFilter;
-            }, 200);
-        }
-    }
-    
-    return linesCleared;
-}
-
 // =====================================================
-// BOARD 3 GAME FUNCTIONS
+// KEYBOARD INPUT
 // =====================================================
 
-/**
- * Spawns a new piece for board 3
- */
-function spawnNewPieceBoard3(): void {
-    if (nextPieceBoard3 === null) {
-        const pieceTypes = Object.keys(PIECES) as PieceType[];
-        nextPieceBoard3 = pieceTypes[Math.floor(Math.random() * pieceTypes.length)];
-    }
-    
-    const pieceType = nextPieceBoard3;
-    
-    currentPieceBoard3 = {
-        type: pieceType,
-        shape: PIECES[pieceType],
-        x: Math.floor(GRID_WIDTH / 2) - 1,
-        y: 0,
-        color: PIECE_COLORS[pieceType]
-    };
-    
-    if (checkCollisionBoard3()) {
-        isGameOverBoard3 = true;
-        currentPieceBoard3 = null;
-        
-        if (aiEnabledBoard3) {
-            aiEnabledBoard3 = false;
-            aiTargetPositionBoard3 = null;
-            aiMovingBoard3 = false;
-        }
-        
-        console.log("GAME OVER on Board 3!");
-        showGameOverScreen();
-        return;
-    }
-    
-    const pieceTypes = Object.keys(PIECES) as PieceType[];
-    nextPieceBoard3 = pieceTypes[Math.floor(Math.random() * pieceTypes.length)];
-    
-    updateNextPiecePreview(3);
-    
-    console.log(`Board 3: Spawned piece: ${pieceType}, Next piece: ${nextPieceBoard3}`);
-}
-
-/**
- * Checks collision for board 3's current piece
- */
-function checkCollisionBoard3(): boolean {
-    if (!currentPieceBoard3) return false;
-    
-    for (let row = 0; row < currentPieceBoard3.shape.length; row++) {
-        for (let col = 0; col < currentPieceBoard3.shape[row].length; col++) {
-            if (!currentPieceBoard3.shape[row][col]) continue;
-            
-            const boardX = currentPieceBoard3.x + col;
-            const boardY = currentPieceBoard3.y + row;
-            
-            if (boardX < 0 || boardX >= GRID_WIDTH || boardY >= GRID_HEIGHT) {
-                return true;
-            }
-            
-            if (boardY >= 0 && boardStateBoard3[boardY][boardX]) {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
-/**
- * Moves board 3's piece down
- */
-function movePieceDownBoard3(): boolean {
-    if (!currentPieceBoard3) return false;
-    
-    currentPieceBoard3.y++;
-    
-    if (checkCollisionBoard3()) {
-        currentPieceBoard3.y--;
-        lockPieceBoard3();
-        spawnNewPieceBoard3();
-        return false;
-    }
-    
-    return true;
-}
-
-/**
- * Moves board 3's piece horizontally
- */
-function movePieceHorizontallyBoard3(direction: number): boolean {
-    if (!currentPieceBoard3) return false;
-    
-    const originalX = currentPieceBoard3.x;
-    currentPieceBoard3.x += direction;
-    
-    if (checkCollisionBoard3()) {
-        currentPieceBoard3.x = originalX;
-        return false;
-    }
-    
-    return true;
-}
-
-/**
- * Rotates board 3's piece
- */
-function rotatePieceBoard3(): boolean {
-    if (!currentPieceBoard3) return false;
-    
-    if (currentPieceBoard3.type === 'O') return false;
-    
-    const originalShape = currentPieceBoard3.shape;
-    currentPieceBoard3.shape = rotateShape(currentPieceBoard3.shape);
-    
-    if (!checkCollisionBoard3()) {
-        return true;
-    }
-    
-    // Wall kicks
-    currentPieceBoard3.x -= 1;
-    if (!checkCollisionBoard3()) return true;
-    
-    currentPieceBoard3.x += 2;
-    if (!checkCollisionBoard3()) return true;
-    
-    currentPieceBoard3.x -= 1;
-    currentPieceBoard3.y -= 1;
-    if (!checkCollisionBoard3()) return true;
-    
-    // Revert
-    currentPieceBoard3.y += 1;
-    currentPieceBoard3.shape = originalShape;
-    return false;
-}
-
-/**
- * Hard drops board 3's piece
- */
-function hardDropBoard3(): void {
-    if (!currentPieceBoard3) return;
-    
-    while (!checkCollisionBoard3()) {
-        currentPieceBoard3.y++;
-    }
-    
-    currentPieceBoard3.y--;
-    lockPieceBoard3();
-    spawnNewPieceBoard3();
-    lastDropTimeBoard3 = performance.now();
-}
-
-/**
- * Locks board 3's piece in place
- */
-function lockPieceBoard3(): void {
-    if (!currentPieceBoard3) return;
-    
-    for (let row = 0; row < currentPieceBoard3.shape.length; row++) {
-        for (let col = 0; col < currentPieceBoard3.shape[row].length; col++) {
-            if (currentPieceBoard3.shape[row][col]) {
-                const boardY = currentPieceBoard3.y + row;
-                const boardX = currentPieceBoard3.x + col;
-                
-                if (boardY >= 0) {
-                    boardStateBoard3[boardY][boardX] = currentPieceBoard3.color;
-                }
-            }
-        }
-    }
-    
-    currentPieceBoard3 = null;
-    clearLinesBoard3();
-}
-
-/**
- * Clears completed lines on board 3
- */
-function clearLinesBoard3(): number {
-    let linesCleared = 0;
-    
-    for (let row = GRID_HEIGHT - 1; row >= 0; row--) {
-        let isLineFull = true;
-        
-        for (let col = 0; col < GRID_WIDTH; col++) {
-            if (!boardStateBoard3[row][col]) {
-                isLineFull = false;
-                break;
-            }
-        }
-        
-        if (isLineFull) {
-            boardStateBoard3.splice(row, 1);
-            const newRow: (string | null)[] = new Array(GRID_WIDTH).fill(null);
-            boardStateBoard3.unshift(newRow);
-            linesCleared++;
-            row++;
-        }
-    }
-    
-    if (linesCleared > 0) {
-        points += linesCleared;
-        totalLinesClearedBoard3 += linesCleared;
-        updatePointsDisplay();
-        
-        // Flash effect for board 3
-        const canvas3 = document.getElementById('game-canvas-3') as HTMLCanvasElement;
-        if (canvas3) {
-            const originalFilter = canvas3.style.filter;
-            const brightness = 1 + (linesCleared * 0.3);
-            canvas3.style.filter = `brightness(${brightness})`;
-            setTimeout(() => {
-                canvas3.style.filter = originalFilter;
-            }, 200);
-        }
-    }
-    
-    return linesCleared;
-}
-
-/**
- * Draws board 3's game board
- */
-function drawBoard3(): void {
-    const canvas3 = document.getElementById('game-canvas-3') as HTMLCanvasElement;
-    if (!canvas3) return;
-    
-    const ctx3 = canvas3.getContext('2d');
-    if (!ctx3) return;
-    
-    ctx3.clearRect(0, 0, canvas3.width, canvas3.height);
-    
-    ctx3.fillStyle = '#000000';
-    ctx3.fillRect(PADDING, PADDING, BOARD_WIDTH, BOARD_HEIGHT);
-    
-    ctx3.strokeStyle = '#3b3b3bff';
-    ctx3.lineWidth = 1;
-    
-    for (let col = 0; col <= GRID_WIDTH; col++) {
-        const x = PADDING + (col * CELL_SIZE);
-        ctx3.beginPath();
-        ctx3.moveTo(x, PADDING);
-        ctx3.lineTo(x, PADDING + BOARD_HEIGHT);
-        ctx3.stroke();
-    }
-    
-    for (let row = 0; row <= GRID_HEIGHT; row++) {
-        const y = PADDING + (row * CELL_SIZE);
-        ctx3.beginPath();
-        ctx3.moveTo(PADDING, y);
-        ctx3.lineTo(PADDING + BOARD_WIDTH, y);
-        ctx3.stroke();
-    }
-    
-    ctx3.strokeStyle = '#666666';
-    ctx3.lineWidth = 2;
-    ctx3.strokeRect(PADDING, PADDING, BOARD_WIDTH, BOARD_HEIGHT);
-}
-
-/**
- * Draws a block on board 3
- */
-function drawBlockBoard3(x: number, y: number, color: string): void {
-    const canvas3 = document.getElementById('game-canvas-3') as HTMLCanvasElement;
-    if (!canvas3) return;
-    
-    const ctx3 = canvas3.getContext('2d');
-    if (!ctx3) return;
-    
-    const pixelX = PADDING + (x * CELL_SIZE);
-    const pixelY = PADDING + (y * CELL_SIZE);
-    
-    ctx3.fillStyle = color;
-    ctx3.fillRect(pixelX, pixelY, CELL_SIZE, CELL_SIZE);
-    
-    ctx3.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-    ctx3.lineWidth = 2;
-    ctx3.beginPath();
-    ctx3.moveTo(pixelX, pixelY + CELL_SIZE);
-    ctx3.lineTo(pixelX, pixelY);
-    ctx3.lineTo(pixelX + CELL_SIZE, pixelY);
-    ctx3.stroke();
-    
-    ctx3.strokeStyle = 'rgba(0, 0, 0, 0.3)';
-    ctx3.beginPath();
-    ctx3.moveTo(pixelX + CELL_SIZE, pixelY);
-    ctx3.lineTo(pixelX + CELL_SIZE, pixelY + CELL_SIZE);
-    ctx3.lineTo(pixelX, pixelY + CELL_SIZE);
-    ctx3.stroke();
-}
-
-/**
- * Draws board 3's current piece
- */
-function drawCurrentPieceBoard3(): void {
-    if (!currentPieceBoard3) return;
-    
-    for (let row = 0; row < currentPieceBoard3.shape.length; row++) {
-        for (let col = 0; col < currentPieceBoard3.shape[row].length; col++) {
-            if (currentPieceBoard3.shape[row][col]) {
-                const boardX = currentPieceBoard3.x + col;
-                const boardY = currentPieceBoard3.y + row;
-                drawBlockBoard3(boardX, boardY, currentPieceBoard3.color);
-            }
-        }
-    }
-}
-
-/**
- * Draws board 3's locked pieces
- */
-function drawBoardStateBoard3(): void {
-    for (let row = 0; row < GRID_HEIGHT; row++) {
-        for (let col = 0; col < GRID_WIDTH; col++) {
-            const blockColor = boardStateBoard3[row][col];
-            if (blockColor) {
-                drawBlockBoard3(col, row, blockColor);
-            }
-        }
-    }
-}
-
-    /**
-     * Checks for and clears any completed lines
-     * This is the core scoring mechanic of Idletris!
-     * @returns The number of lines cleared
-     */
-    function clearLines(): number {
-        // Keep track of how many lines we clear
-        let linesCleared = 0;
-        
-        // Check each row from bottom to top
-        // We go bottom-up because we'll be removing rows
-        for (let row = GRID_HEIGHT - 1; row >= 0; row--) {
-            // Check if this row is completely filled
-            let isLineFull = true;
-            
-            for (let col = 0; col < GRID_WIDTH; col++) {
-                // If any cell in this row is empty, the line isn't full
-                if (!boardState[row][col]) {
-                    isLineFull = false;
-                    break;  // No need to check rest of row
-                }
-            }
-            
-            // If the line is full, clear it!
-            if (isLineFull) {
-                // Remove this row from the board
-                boardState.splice(row, 1);
-                
-                // Add a new empty row at the top
-                // This makes everything above "fall down"
-                const newRow: (string | null)[] = new Array(GRID_WIDTH).fill(null);
-                boardState.unshift(newRow);  // unshift adds to beginning of array
-                
-                // Count this cleared line
-                linesCleared++;
-                
-                // Check the same row again since everything shifted down
-                // (The row that was above is now at this index)
-                row++;  // This will get decremented by the loop, keeping us at same index
-            }
-        }
-        
-        // Log cleared lines for debugging (we'll add scoring later)
-        if (linesCleared > 0) {
-            console.log(`Cleared ${linesCleared} line${linesCleared > 1 ? 's' : ''}!`);
-            
-            // Add points (1 point per line)
-            addPoints(linesCleared);
-            
-            // Add a visual flash effect when lines clear
-            flashEffect(linesCleared);
-        }
-        
-        return linesCleared;
-    }
-
-    /**
-     * Updates the points display on screen
-     * Now updates the global points in the header
-     */
-    function updatePointsDisplay(): void {
-        // Update the global points value in header
-        const globalPointsElement = document.getElementById('global-points-value');
-        if (globalPointsElement) {
-            globalPointsElement.textContent = points.toString();
-        }
-        
-        // Update board 1 lines
-        const board1LinesElement = document.getElementById('board-1-lines');
-        if (board1LinesElement) {
-            board1LinesElement.textContent = totalLinesCleared.toString();
-        }
-        
-        // Update board 2 lines (if board 2 exists)
-        const board2LinesElement = document.getElementById('board-2-lines');
-        if (board2LinesElement) {
-            board2LinesElement.textContent = totalLinesClearedBoard2.toString();
-        }
-        
-        // Update board 3 lines (if board 3 exists)
-        const board3LinesElement = document.getElementById('board-3-lines');
-        if (board3LinesElement) {
-            board3LinesElement.textContent = totalLinesClearedBoard3.toString();
-        }
-        
-        // Update all the buttons
-        updateGlobalHardDropButton();
-        updateUnlockSecondBoardButton();
-        updateUnlockThirdBoardButton();
-        updateBoard1Buttons();
-        
-        // Update board 2 buttons if second board is unlocked
-        if (secondBoardUnlocked) {
-            updateBoard2Buttons();
-        }
-        
-        // Update board 3 buttons if third board is unlocked
-        if (thirdBoardUnlocked) {
-            updateBoard3Buttons();
-        }
-        
-        // Update the Board 1 Lost overlay if it exists (so button enables when affordable)
-        updateBoard1LostOverlay();
-        
-        // Update the Board 2 Lost overlay if it exists
-        updateBoard2LostOverlay();
-    }
-
-    /**
-     * Updates the global hard drop button in the header
-     */
-    function updateGlobalHardDropButton(): void {
-    const hardDropButton = document.getElementById('global-harddrop-button') as HTMLButtonElement;
-    if (!hardDropButton) return;
-    
-    if (hardDropUnlocked) {
-        // Already purchased - show as disabled
-        hardDropButton.textContent = 'Hard Drop ✓';
-        hardDropButton.style.display = 'block';
-        hardDropButton.style.backgroundColor = '#888888';
-        hardDropButton.style.cursor = 'default';
-        hardDropButton.disabled = true;
-    } else if (points >= HARD_DROP_COST) {
-        // Player has enough points - show available button
-        const wasHidden = hardDropButton.style.display === 'none';
-        hardDropButton.style.display = 'block';
-        hardDropButton.style.backgroundColor = '#2196F3';
-        hardDropButton.style.cursor = 'pointer';
-        hardDropButton.disabled = false;
-        
-        // Show dialogue if this is the first time the button is becoming visible
-        if (wasHidden && !shownDialogues.has('global-harddrop')) {
-            showDialogue('global-harddrop', hardDropButton);
-        }
-    } else {
-        // Not enough points - hide button
-        hardDropButton.style.display = 'none';
-    }
-}
-
-    /**
-     * Updates the unlock second board button visibility
-     */
-    function updateUnlockSecondBoardButton(): void {
-        const unlockButton = document.getElementById('unlock-second-board-button') as HTMLButtonElement;
-        if (!unlockButton) return;
-        
-        // Check if requirements are met and board not already unlocked
-        if (!secondBoardUnlocked && checkSecondBoardRequirements()) {
-            if (points >= UNLOCK_SECOND_BOARD_COST) {
-                // Can unlock - show button
-                unlockButton.style.display = 'block';
-                unlockButton.style.backgroundColor = '#FF5722';
-                unlockButton.style.cursor = 'pointer';
-                unlockButton.disabled = false;
-            } else {
-                // Requirements met but not enough points - show disabled
-                unlockButton.style.display = 'block';
-                unlockButton.style.backgroundColor = '#888888';
-                unlockButton.style.cursor = 'not-allowed';
-                unlockButton.disabled = true;
-                unlockButton.textContent = `Unlock 2nd Board (need ${UNLOCK_SECOND_BOARD_COST} pts)`;
-            }
-        } else if (secondBoardUnlocked) {
-            // Already unlocked - hide button
-            unlockButton.style.display = 'none';
-        } else {
-            // Requirements not met - hide button
-            unlockButton.style.display = 'none';
-        }
-    }
-
-    /**
-     * Updates the unlock third board button visibility
-     */
-    function updateUnlockThirdBoardButton(): void {
-        const unlockButton = document.getElementById('unlock-third-board-button') as HTMLButtonElement;
-        if (!unlockButton) return;
-        
-        // Check if requirements are met and board not already unlocked
-        if (secondBoardUnlocked && !thirdBoardUnlocked && checkThirdBoardRequirements()) {
-            if (points >= UNLOCK_THIRD_BOARD_COST) {
-                // Can unlock - show button
-                unlockButton.style.display = 'block';
-                unlockButton.style.backgroundColor = '#9C27B0';
-                unlockButton.style.cursor = 'pointer';
-                unlockButton.disabled = false;
-                unlockButton.textContent = `Unlock 3rd Board (${UNLOCK_THIRD_BOARD_COST} pts)`;
-            } else {
-                // Requirements met but not enough points - show disabled
-                unlockButton.style.display = 'block';
-                unlockButton.style.backgroundColor = '#888888';
-                unlockButton.style.cursor = 'not-allowed';
-                unlockButton.disabled = true;
-                unlockButton.textContent = `Unlock 3rd Board (need ${UNLOCK_THIRD_BOARD_COST} pts)`;
-            }
-        } else if (thirdBoardUnlocked) {
-            // Already unlocked - hide button
-            unlockButton.style.display = 'none';
-        } else {
-            // Requirements not met - hide button
-            unlockButton.style.display = 'none';
-        }
-    }
-
-    /**
-     * Updates all board 1 specific buttons
-     */
-    function updateBoard1Buttons(): void {
-        updateForceNextPieceUI(1);
-        updateAIButtonBoard(1);
-        updateAIHardDropButtonBoard(1);
-        updateAISpeedButtonBoard(1);
-    }
-
-    /**
-     * Generic function to update AI button for a specific board
-     */
-    function updateAIButtonBoard(boardNumber: number): void {
-    const aiButton = document.getElementById(`ai-button-${boardNumber}`) as HTMLButtonElement;
-    if (!aiButton) return;
-    
-    if (boardNumber === 1) {
-        if (aiPlayerHired && aiEnabled) {
-            aiButton.textContent = '🤖 AI Active';
-            aiButton.style.display = 'block';
-            aiButton.style.backgroundColor = '#888888';
-            aiButton.style.cursor = 'default';
-            aiButton.disabled = true;
-        } else if (points >= AI_PLAYER_COST && !aiPlayerHired) {
-            const wasHidden = aiButton.style.display === 'none';
-            aiButton.style.display = 'block';
-            aiButton.style.backgroundColor = '#4CAF50';
-            aiButton.style.cursor = 'pointer';
-            aiButton.disabled = false;
-            aiButton.textContent = `Hire AI (${AI_PLAYER_COST} pts)`;
-            
-            // Show dialogue if this is the first time the button is becoming visible
-            if (wasHidden && !shownDialogues.has('hire-ai-1')) {
-                showDialogue('hire-ai-1', aiButton);
-            }
-        } else {
-            aiButton.style.display = 'none';
-        }
-    } else if (boardNumber === 2) {
-        if (aiPlayerHiredBoard2 && aiEnabledBoard2) {
-            aiButton.textContent = '🤖 AI Active';
-            aiButton.style.display = 'block';
-            aiButton.style.backgroundColor = '#888888';
-            aiButton.style.cursor = 'default';
-            aiButton.disabled = true;
-        } else if (points >= AI_PLAYER_COST && !aiPlayerHiredBoard2) {
-            aiButton.style.display = 'block';
-            aiButton.style.backgroundColor = '#4CAF50';
-            aiButton.style.cursor = 'pointer';
-            aiButton.disabled = false;
-            aiButton.textContent = `Hire AI (${AI_PLAYER_COST} pts)`;
-        } else {
-            aiButton.style.display = 'none';
-        }
-    } else if (boardNumber === 3) {
-        if (aiPlayerHiredBoard3 && aiEnabledBoard3) {
-            aiButton.textContent = '🤖 AI Active';
-            aiButton.style.display = 'block';
-            aiButton.style.backgroundColor = '#888888';
-            aiButton.style.cursor = 'default';
-            aiButton.disabled = true;
-        } else if (points >= AI_PLAYER_COST && !aiPlayerHiredBoard3) {
-            aiButton.style.display = 'block';
-            aiButton.style.backgroundColor = '#4CAF50';
-            aiButton.style.cursor = 'pointer';
-            aiButton.disabled = false;
-            aiButton.textContent = `Hire AI (${AI_PLAYER_COST} pts)`;
-        } else {
-            aiButton.style.display = 'none';
-        }
-    }
-}
-
-    /**
-     * Updates AI hard drop button for a specific board
-     */
-    function updateAIHardDropButtonBoard(boardNumber: number): void {
-    const aiHardDropButton = document.getElementById(`ai-harddrop-button-${boardNumber}`) as HTMLButtonElement;
-    if (!aiHardDropButton) return;
-    
-    if (boardNumber === 1) {
-        if (!aiPlayerHired) {
-            aiHardDropButton.style.display = 'none';
-        } else if (aiHardDropUnlocked) {
-            aiHardDropButton.textContent = 'AI Hard Drop ✓';
-            aiHardDropButton.style.display = 'block';
-            aiHardDropButton.style.backgroundColor = '#888888';
-            aiHardDropButton.style.cursor = 'default';
-            aiHardDropButton.disabled = true;
-        } else if (points >= AI_HARD_DROP_COST) {
-            const wasHidden = aiHardDropButton.style.display === 'none';
-            aiHardDropButton.style.display = 'block';
-            aiHardDropButton.style.backgroundColor = '#FF9800';
-            aiHardDropButton.style.cursor = 'pointer';
-            aiHardDropButton.disabled = false;
-            
-            // Show dialogue if this is the first time the button is becoming visible
-            if (wasHidden && !shownDialogues.has('ai-harddrop-1')) {
-                showDialogue('ai-harddrop-1', aiHardDropButton);
-            }
-        } else {
-            aiHardDropButton.style.display = 'none';
-        }
-    } else if (boardNumber === 2) {
-        if (!aiPlayerHiredBoard2) {
-            aiHardDropButton.style.display = 'none';
-        } else if (aiHardDropUnlockedBoard2) {
-            aiHardDropButton.textContent = 'AI Hard Drop ✓';
-            aiHardDropButton.style.display = 'block';
-            aiHardDropButton.style.backgroundColor = '#888888';
-            aiHardDropButton.style.cursor = 'default';
-            aiHardDropButton.disabled = true;
-        } else if (points >= AI_HARD_DROP_COST) {
-            aiHardDropButton.style.display = 'block';
-            aiHardDropButton.style.backgroundColor = '#FF9800';
-            aiHardDropButton.style.cursor = 'pointer';
-            aiHardDropButton.disabled = false;
-        } else {
-            aiHardDropButton.style.display = 'none';
-        }
-    } else if (boardNumber === 3) {
-        if (!aiPlayerHiredBoard3) {
-            aiHardDropButton.style.display = 'none';
-        } else if (aiHardDropUnlockedBoard3) {
-            aiHardDropButton.textContent = 'AI Hard Drop ✓';
-            aiHardDropButton.style.display = 'block';
-            aiHardDropButton.style.backgroundColor = '#888888';
-            aiHardDropButton.style.cursor = 'default';
-            aiHardDropButton.disabled = true;
-        } else if (points >= AI_HARD_DROP_COST) {
-            aiHardDropButton.style.display = 'block';
-            aiHardDropButton.style.backgroundColor = '#FF9800';
-            aiHardDropButton.style.cursor = 'pointer';
-            aiHardDropButton.disabled = false;
-        } else {
-            aiHardDropButton.style.display = 'none';
-        }
-    }
-}
-
-    /**
-     * Updates AI speed button for a specific board
-     */
-    function updateAISpeedButtonBoard(boardNumber: number): void {
-    const aiSpeedButton = document.getElementById(`ai-speed-button-${boardNumber}`) as HTMLButtonElement;
-    if (!aiSpeedButton) return;
-    
-    if (boardNumber === 1) {
-        if (!aiPlayerHired) {
-            aiSpeedButton.style.display = 'none';
-        } else if (aiSpeedLevel >= MAX_AI_SPEED_UPGRADES) {
-            aiSpeedButton.textContent = 'AI Speed MAX ✓';
-            aiSpeedButton.style.display = 'block';
-            aiSpeedButton.style.backgroundColor = '#888888';
-            aiSpeedButton.style.cursor = 'default';
-            aiSpeedButton.disabled = true;
-        } else if (points >= AI_SPEED_UPGRADE_COST) {
-            const wasHidden = aiSpeedButton.style.display === 'none';
-            aiSpeedButton.style.display = 'block';
-            aiSpeedButton.style.backgroundColor = '#00BCD4';
-            aiSpeedButton.style.cursor = 'pointer';
-            aiSpeedButton.disabled = false;
-            aiSpeedButton.textContent = `AI Speed Lv${aiSpeedLevel + 1} (${AI_SPEED_UPGRADE_COST} pts)`;
-            
-            // Show dialogue if this is the first time the button is becoming visible
-            if (wasHidden && !shownDialogues.has('ai-speed-1')) {
-                showDialogue('ai-speed-1', aiSpeedButton);
-            }
-        } else {
-            aiSpeedButton.style.display = 'none';
-        }
-    } else if (boardNumber === 2) {
-        if (!aiPlayerHiredBoard2) {
-            aiSpeedButton.style.display = 'none';
-        } else if (aiSpeedLevelBoard2 >= MAX_AI_SPEED_UPGRADES) {
-            aiSpeedButton.textContent = 'AI Speed MAX ✓';
-            aiSpeedButton.style.display = 'block';
-            aiSpeedButton.style.backgroundColor = '#888888';
-            aiSpeedButton.style.cursor = 'default';
-            aiSpeedButton.disabled = true;
-        } else if (points >= AI_SPEED_UPGRADE_COST) {
-            aiSpeedButton.style.display = 'block';
-            aiSpeedButton.style.backgroundColor = '#00BCD4';
-            aiSpeedButton.style.cursor = 'pointer';
-            aiSpeedButton.disabled = false;
-            aiSpeedButton.textContent = `AI Speed Lv${aiSpeedLevelBoard2 + 1} (${AI_SPEED_UPGRADE_COST} pts)`;
-        } else {
-            aiSpeedButton.style.display = 'none';
-        }
-    } else if (boardNumber === 3) {
-        if (!aiPlayerHiredBoard3) {
-            aiSpeedButton.style.display = 'none';
-        } else if (aiSpeedLevelBoard3 >= MAX_AI_SPEED_UPGRADES) {
-            aiSpeedButton.textContent = 'AI Speed MAX ✓';
-            aiSpeedButton.style.display = 'block';
-            aiSpeedButton.style.backgroundColor = '#888888';
-            aiSpeedButton.style.cursor = 'default';
-            aiSpeedButton.disabled = true;
-        } else if (points >= AI_SPEED_UPGRADE_COST) {
-            aiSpeedButton.style.display = 'block';
-            aiSpeedButton.style.backgroundColor = '#00BCD4';
-            aiSpeedButton.style.cursor = 'pointer';
-            aiSpeedButton.disabled = false;
-            aiSpeedButton.textContent = `AI Speed Lv${aiSpeedLevelBoard3 + 1} (${AI_SPEED_UPGRADE_COST} pts)`;
-        } else {
-            aiSpeedButton.style.display = 'none';
-        }
-    }
-}
-
-    /**
-     * Adds points when lines are cleared
-     * @param linesCleared - Number of lines that were cleared
-     */
-    function addPoints(linesCleared: number): void {
-        // Each line cleared gives 1 point
-        points += linesCleared;
-        totalLinesCleared += linesCleared;
-        
-        // Update the display
-        updatePointsDisplay();
-        
-        // Log for debugging
-        console.log(`Earned ${linesCleared} point${linesCleared > 1 ? 's' : ''}! Total points: ${points}`);
-        
-        // Show a floating points animation
-        showPointsAnimation(linesCleared);
-    }
-
-    /**
-     * Shows a floating "+X points" animation when earning points
-     * @param pointsEarned - Number of points that were earned
-     */
-    function showPointsAnimation(pointsEarned: number): void {
-        // Create a temporary div for the animation
-        const floater = document.createElement('div');
-        floater.textContent = `+${pointsEarned} point${pointsEarned > 1 ? 's' : ''}!`;
-        
-        // Style the floating text
-        floater.style.position = 'fixed';
-        floater.style.left = '50%';
-        floater.style.top = '50%';
-        floater.style.transform = 'translateX(-50%)';
-        floater.style.color = '#4CAF50';
-        floater.style.fontSize = '28px';
-        floater.style.fontWeight = 'bold';
-        floater.style.textShadow = '2px 2px 4px rgba(0,0,0,0.8)';
-        floater.style.zIndex = '2000';
-        floater.style.pointerEvents = 'none';  // Can't click on it
-        floater.style.animation = 'floatUp 1.5s ease-out forwards';
-        
-        // Add the float animation if it doesn't exist
-        if (!document.getElementById('float-animation')) {
-            const style = document.createElement('style');
-            style.id = 'float-animation';
-            style.textContent = `
-                @keyframes floatUp {
-                    0% { 
-                        opacity: 1; 
-                        transform: translateX(-50%) translateY(0);
-                    }
-                    100% { 
-                        opacity: 0; 
-                        transform: translateX(-50%) translateY(-100px);
-                    }
-                }
-            `;
-            document.head.appendChild(style);
-        }
-        
-        // Add to page
-        document.body.appendChild(floater);
-        
-        // Remove after animation completes
-        setTimeout(() => {
-            floater.remove();
-        }, 1500);
-    }
-
-    /**
-     * Handles hiring the AI player
-     */
-    function hireAIPlayer(): void {
-    // Check if player has enough points
-    if (points < AI_PLAYER_COST) {
-        console.log("Not enough points!");
-        return;
-    }
-    
-    // Deduct the points
-    points -= AI_PLAYER_COST;
-    
-    // Mark AI as hired and ENABLE IT
-    aiPlayerHired = true;
-    aiEnabled = true;  // Turn on the AI
-    
-    // Update board status to show AI control
-    updateBoardStatus(1);
-    
-    // Update the display
-    updatePointsDisplay();
-    
-    // Show success message
-    console.log("AI Player hired and activated!");
-    
-    // Show a special effect
-    const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
-    if (canvas) {
-        canvas.style.transition = 'box-shadow 0.5s ease';
-        canvas.style.boxShadow = '0 0 40px rgba(76,175,80,0.8)';
-        
-        setTimeout(() => {
-            canvas.style.boxShadow = '0 0 20px rgba(0,0,0,0.3)';
-        }, 500);
-    }
-}
-
-    /**
-     * Handles hiring the AI player for board 2
-     */
-    function hireAIPlayerBoard2(): void {
-        if (points < AI_PLAYER_COST) {
-            console.log("Not enough points for Board 2 AI!");
-            return;
-        }
-        
-        points -= AI_PLAYER_COST;
-        
-        aiPlayerHiredBoard2 = true;
-        aiEnabledBoard2 = true;
-        
-        // Switch player control away from board 2 since AI now controls it
-        activePlayerBoard = 1;  // This may need adjustment based on your game logic
-        
-        updateBoardStatus(2);
-        updatePointsDisplay();
-        updateBoard2Buttons();
-        
-        console.log("AI Player hired for Board 2!");
-        
-        const canvas2 = document.getElementById('game-canvas-2') as HTMLCanvasElement;
-        if (canvas2) {
-            canvas2.style.transition = 'box-shadow 0.5s ease';
-            canvas2.style.boxShadow = '0 0 40px rgba(76,175,80,0.8)';
-            
-            setTimeout(() => {
-                canvas2.style.boxShadow = '0 0 20px rgba(0,0,0,0.3)';
-            }, 500);
-        }
-    }
-
-    /**
-     * Handles purchasing AI hard drop for board 2
-     */
-    function purchaseAIHardDropBoard2(): void {
-        if (!aiPlayerHiredBoard2) {
-            console.log("Must hire AI first for Board 2!");
-            return;
-        }
-        
-        if (points < AI_HARD_DROP_COST) {
-            console.log("Not enough points for Board 2 AI Hard Drop!");
-            return;
-        }
-        
-        points -= AI_HARD_DROP_COST;
-        aiHardDropUnlockedBoard2 = true;
-        
-        updatePointsDisplay();
-        updateBoard2Buttons();
-        
-        console.log("AI Hard Drop unlocked for Board 2!");
-    }
-
-    /**
-     * Handles purchasing AI speed upgrade for board 2
-     */
-    function purchaseAISpeedUpgradeBoard2(): void {
-        if (!aiPlayerHiredBoard2) {
-            console.log("Must hire AI first for Board 2!");
-            return;
-        }
-        
-        if (aiSpeedLevelBoard2 >= MAX_AI_SPEED_UPGRADES) {
-            console.log("Board 2 AI Speed already maxed!");
-            return;
-        }
-        
-        if (points < AI_SPEED_UPGRADE_COST) {
-            console.log("Not enough points for Board 2 AI Speed!");
-            return;
-        }
-        
-        points -= AI_SPEED_UPGRADE_COST;
-        aiSpeedLevelBoard2++;
-        
-        // Calculate new speed (faster with each upgrade)
-        aiSpeedBoard2 = BASE_AI_SPEED / Math.pow(1.5, aiSpeedLevelBoard2);
-        
-        updatePointsDisplay();
-        updateBoard2Buttons();
-        
-        console.log(`Board 2 AI Speed upgraded to level ${aiSpeedLevelBoard2}!`);
-    }
-
-    // =====================================================
-    // BOARD 3 HIRE AND UPGRADE FUNCTIONS
-    // =====================================================
-
-    /**
-     * Handles hiring the AI player for board 3
-     */
-    function hireAIPlayerBoard3(): void {
-        if (points < AI_PLAYER_COST) {
-            console.log("Not enough points for Board 3 AI!");
-            return;
-        }
-        
-        points -= AI_PLAYER_COST;
-        
-        aiPlayerHiredBoard3 = true;
-        aiEnabledBoard3 = true;
-        
-        updateBoardStatus(3);
-        updatePointsDisplay();
-        updateBoard3Buttons();
-        
-        console.log("AI Player hired for Board 3!");
-        
-        const canvas3 = document.getElementById('game-canvas-3') as HTMLCanvasElement;
-        if (canvas3) {
-            canvas3.style.transition = 'box-shadow 0.5s ease';
-            canvas3.style.boxShadow = '0 0 40px rgba(76,175,80,0.8)';
-            
-            setTimeout(() => {
-                canvas3.style.boxShadow = '0 0 20px rgba(0,0,0,0.3)';
-            }, 500);
-        }
-    }
-
-    /**
-     * Handles purchasing AI hard drop for board 3
-     */
-    function purchaseAIHardDropBoard3(): void {
-        if (!aiPlayerHiredBoard3) {
-            console.log("Must hire AI first for Board 3!");
-            return;
-        }
-        
-        if (points < AI_HARD_DROP_COST) {
-            console.log("Not enough points for Board 3 AI Hard Drop!");
-            return;
-        }
-        
-        points -= AI_HARD_DROP_COST;
-        aiHardDropUnlockedBoard3 = true;
-        
-        updatePointsDisplay();
-        updateBoard3Buttons();
-        
-        console.log("AI Hard Drop unlocked for Board 3!");
-    }
-
-    /**
-     * Handles purchasing AI speed upgrade for board 3
-     */
-    function purchaseAISpeedUpgradeBoard3(): void {
-        if (!aiPlayerHiredBoard3) {
-            console.log("Must hire AI first for Board 3!");
-            return;
-        }
-        
-        if (aiSpeedLevelBoard3 >= MAX_AI_SPEED_UPGRADES) {
-            console.log("Board 3 AI Speed already maxed!");
-            return;
-        }
-        
-        if (points < AI_SPEED_UPGRADE_COST) {
-            console.log("Not enough points for Board 3 AI Speed!");
-            return;
-        }
-        
-        points -= AI_SPEED_UPGRADE_COST;
-        aiSpeedLevelBoard3++;
-        
-        // Calculate new speed (faster with each upgrade)
-        aiSpeedBoard3 = BASE_AI_SPEED / Math.pow(1.5, aiSpeedLevelBoard3);
-        
-        updatePointsDisplay();
-        updateBoard3Buttons();
-        
-        console.log(`Board 3 AI Speed upgraded to level ${aiSpeedLevelBoard3}!`);
-    }
-
-    /**
-     * Force next piece for board 3
-     */
-    function forceNextPieceBoard3(pieceType: PieceType): void {
-        if (!forceNextPieceUnlocked) {
-            console.log("Force Next Piece not unlocked yet!");
-            return;
-        }
-        
-        if (nextPieceBoard3 === pieceType) {
-            console.log(`Board 3: Next piece is already '${pieceType}'!`);
-            return;
-        }
-        
-        if (points < FORCE_NEXT_PIECE_USE_COST) {
-            console.log("Not enough points to force next piece!");
-            return;
-        }
-        
-        points -= FORCE_NEXT_PIECE_USE_COST;
-        nextPieceBoard3 = pieceType;
-        
-        updatePointsDisplay();
-        updateNextPiecePreview(3);
-        
-        console.log(`Board 3: Next piece changed to '${pieceType}'!`);
-    }
-
-    /**
-     * Updates all board 2 specific buttons
-     */
-    function updateBoard2Buttons(): void {
-        updateForceNextPieceUI(2);
-        updateAIButtonBoard(2);
-        updateAIHardDropButtonBoard(2);
-        updateAISpeedButtonBoard(2);
-    }
-
-    /**
-     * Updates all board 3 specific buttons
-     */
-    function updateBoard3Buttons(): void {
-        updateForceNextPieceUI(3);
-        updateAIButtonBoard(3);
-        updateAIHardDropButtonBoard(3);
-        updateAISpeedButtonBoard(3);
-    }
-
-    /**
-     * Updates the board status display (Player/AI control)
-     */
-    function updateBoardStatus(boardNumber: number): void {
-        const statusSection = document.getElementById(`board-${boardNumber}-status`);
-        if (!statusSection) return;
-        
-        if (boardNumber === 1 && aiEnabled) {
-            statusSection.style.backgroundColor = 'rgba(255, 152, 0, 0.2)';
-            statusSection.innerHTML = '<span>🤖 AI Control</span>';
-        } else if (boardNumber === 2 && aiEnabledBoard2) {
-            statusSection.style.backgroundColor = 'rgba(255, 152, 0, 0.2)';
-            statusSection.innerHTML = '<span>🤖 AI Control</span>';
-        } else if (boardNumber === 3 && aiEnabledBoard3) {
-            statusSection.style.backgroundColor = 'rgba(255, 152, 0, 0.2)';
-            statusSection.innerHTML = '<span>🤖 AI Control</span>';
-        } else {
-            statusSection.style.backgroundColor = 'rgba(76, 175, 80, 0.2)';
-            statusSection.innerHTML = '<span>🎮 Player Control</span>';
-        }
-    }
-
-    /**
-     * Handles purchasing the Hard Drop upgrade
-     * Unlocks spacebar control permanently
-     */
-    function purchaseHardDrop(): void {
-    // Check if player has enough points
-    if (points < HARD_DROP_COST) {
-        console.log("Not enough points for Hard Drop!");
-        return;
-    }
-    
-    // Deduct the points
-    points -= HARD_DROP_COST;
-    
-    // Unlock hard drop
-    hardDropUnlocked = true;
-    
-    // Update the display
-    updatePointsDisplay();
-    updateGlobalHardDropButton();
-    
-    // Update the controls display to show spacebar is now available
-    updateControlsDisplay();
-    
-    // Show success message
-    console.log("Hard Drop unlocked! You can now use spacebar.");
-    
-    // Visual feedback
-    const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
-    if (canvas) {
-        canvas.style.transition = 'box-shadow 0.5s ease';
-        canvas.style.boxShadow = '0 0 40px rgba(33,150,243,0.8)';
-        
-        setTimeout(() => {
-            canvas.style.boxShadow = '0 0 20px rgba(0,0,0,0.3)';
-        }, 500);
-    }
-}
-
-
-
-    /**
-     * Updates the controls display in the header
-     */
-    function updateControlsDisplay(): void {
-        const spaceControlText = document.getElementById('space-control-text');
-        if (!spaceControlText) return;
-        
-        if (hardDropUnlocked) {
-            spaceControlText.style.opacity = '1';
-            spaceControlText.style.color = '#4CAF50';
-            spaceControlText.innerHTML = 'Space : Hard Drop ✓';
-        } else {
-            spaceControlText.style.opacity = '0.5';
-            spaceControlText.style.color = '#aaa';
-            spaceControlText.innerHTML = 'Space : Locked';
-        }
-    }
-    /**
-     * Unlocks the second game board
-     * Creates a whole new independent game instance
-     */
-    function unlockSecondBoard(): void {
-        // Check requirements
-        if (!checkSecondBoardRequirements()) {
-            console.log("Requirements not met for second board!");
-            return;
-        }
-        
-        // Check if player has enough points
-        if (points < UNLOCK_SECOND_BOARD_COST) {
-            console.log("Not enough points for second board!");
-            return;
-        }
-        
-        // Deduct points
-        points -= UNLOCK_SECOND_BOARD_COST;
-        
-        // Set flag
-        secondBoardUnlocked = true;
-        
-        // Create the second board
-        console.log("Second board unlocked! Creating board 2...");
-        
-        // Update displays
-        updatePointsDisplay();
-        
-        /* Visual feedback - epic unlock animation!
-        const gameContainer = document.getElementById('game-container');
-        if (gameContainer) {
-            gameContainer.style.transition = 'transform 0.5s ease';
-            gameContainer.style.transform = 'translateX(-50%) scale(1.05)';
-            
-            setTimeout(() => {
-                gameContainer.style.transform = 'translateX(-50%) scale(1)';
-            }, 500);
-        } */
-        
-        createSecondBoard();
-    }
-
-    /**
- * Creates the second game board and its UI
- */
-function createSecondBoard(): void {
-    // Get the game container
-    const gameContainer = document.getElementById('game-container');
-    if (!gameContainer) return;
-    
-    // Create board 2 container
-    const board2Container = document.createElement('div');
-    board2Container.id = 'board-2-container';
-    board2Container.style.display = 'flex';
-    board2Container.style.gap = '20px';
-    
-    // Create the canvas for board 2
-    const canvas2 = document.createElement('canvas');
-    canvas2.id = 'game-canvas-2';
-    canvas2.width = BOARD_WIDTH + (PADDING * 2);
-    canvas2.height = BOARD_HEIGHT + (PADDING * 2);
-    
-    // Add canvas to container
-    board2Container.appendChild(canvas2);
-    
-    // Add to game container
-    gameContainer.appendChild(board2Container);
-    
-    // Create a minimal UI for board 2 (no next piece preview, no upgrades)
-    // Board 2 is player-controlled and has no upgrade path
-    createMinimalBoardUI(2);
-    
-    // Initialize board 2's game state
-    initializeBoardState(2);
-    
-    // Spawn first piece for board 2
-    spawnNewPieceBoard2();
-    
-    // Update board 2 status to show player control
-    updateBoardStatus(2);
-    
-    // Board 1 becomes AI-controlled when board 2 is created
-    activePlayerBoard = 2;  // Player now controls board 2
-    
-    // Make sure board 1's AI stays active
-    if (!aiEnabled) {
-        aiEnabled = true;
-        updateBoardStatus(1);
-    }
-    
-    // Simplify board 1's UI since it's now fully AI-controlled
-    // Hide the next piece preview and upgrade buttons
-    simplifyBoard1UI();
-    
-    console.log("Board 2 created! Player now controls board 2, AI controls board 1.");
-    }
-
-    /**
-     * Unlocks the third game board
-     */
-    function unlockThirdBoard(): void {
-        // Check requirements
-        if (!checkThirdBoardRequirements()) {
-            console.log("Requirements not met for third board!");
-            return;
-        }
-        
-        // Check if player has enough points
-        if (points < UNLOCK_THIRD_BOARD_COST) {
-            console.log("Not enough points for third board!");
-            return;
-        }
-        
-        // Deduct points
-        points -= UNLOCK_THIRD_BOARD_COST;
-        
-        // Set flag
-        thirdBoardUnlocked = true;
-        
-        // Create the third board
-        console.log("Third board unlocked! Creating board 3...");
-        
-        // Update displays
-        updatePointsDisplay();
-        
-        createThirdBoard();
-    }
-
-    /**
-     * Creates the third game board and reorganizes the layout
-     * Board 2 becomes small and goes below board 1
-     */
-    function createThirdBoard(): void {
-        const gameContainer = document.getElementById('game-container');
-        if (!gameContainer) return;
-        
-        // First, shrink board 2 and move it below board 1
-        shrinkBoard2();
-        
-        // Create board 3 container
-        const board3Container = document.createElement('div');
-        board3Container.id = 'board-3-container';
-        board3Container.style.display = 'flex';
-        board3Container.style.gap = '20px';
-        
-        // Create the canvas for board 3 (full size)
-        const canvas3 = document.createElement('canvas');
-        canvas3.id = 'game-canvas-3';
-        canvas3.width = BOARD_WIDTH + (PADDING * 2);
-        canvas3.height = BOARD_HEIGHT + (PADDING * 2);
-        
-        // Add canvas to container
-        board3Container.appendChild(canvas3);
-        
-        // Add to game container (after the small boards column)
-        gameContainer.appendChild(board3Container);
-        
-        // Create full UI for board 3 (with next piece preview and upgrades)
-        createMinimalBoardUI(3);
-        
-        // Initialize board 3's game state
-        initializeBoardState(3);
-        
-        // Spawn first piece for board 3
-        spawnNewPieceBoard3();
-        
-        // Update board 3 status to show player control
-        updateBoardStatus(3);
-        
-        // Player now controls board 3
-        activePlayerBoard = 3;
-        
-        // Make sure board 2's AI is active
-        if (!aiEnabledBoard2) {
-            aiEnabledBoard2 = true;
-            updateBoardStatus(2);
-        }
-        
-        // Hide board 2's upgrade buttons since it's now AI-controlled
-        simplifyBoard2UI();
-        
-        console.log("Board 3 created! Player now controls board 3, AI controls boards 1 and 2.");
-    }
-
-    /**
-     * Shrinks board 2 and repositions it below board 1
-     */
-    function shrinkBoard2(): void {
-        const gameContainer = document.getElementById('game-container');
-        const board1Container = document.getElementById('board-1-container');
-        const board2Container = document.getElementById('board-2-container');
-        
-        if (!gameContainer || !board1Container || !board2Container) return;
-        
-        // Create a column container for the small boards (board 1 and 2)
-        const smallBoardsColumn = document.createElement('div');
-        smallBoardsColumn.id = 'small-boards-column';
-        smallBoardsColumn.style.display = 'flex';
-        smallBoardsColumn.style.flexDirection = 'column';
-        smallBoardsColumn.style.gap = '20px';
-        
-        // Remove board 1 and 2 from game container
-        gameContainer.removeChild(board1Container);
-        gameContainer.removeChild(board2Container);
-        
-        // Shrink board 2's canvas
-        const canvas2 = document.getElementById('game-canvas-2') as HTMLCanvasElement;
-        if (canvas2) {
-            canvas2.width = BOARD_WIDTH_SMALL + (PADDING_SMALL * 2);
-            canvas2.height = BOARD_HEIGHT_SMALL + (PADDING_SMALL * 2);
-        }
-        
-        // Shrink board 2's UI panel
-        const board2UI = document.getElementById('board-2-ui');
-        if (board2UI) {
-            board2UI.style.width = '120px';
-            board2UI.style.padding = '10px';
-            board2UI.style.fontSize = '10px';
-        }
-        
-        // Add both boards to the column
-        smallBoardsColumn.appendChild(board1Container);
-        smallBoardsColumn.appendChild(board2Container);
-        
-        // Add the column to the game container
-        gameContainer.insertBefore(smallBoardsColumn, gameContainer.firstChild);
-    }
-
-    /**
-     * Simplifies Board 2's UI when the third board is unlocked
-     */
-    function simplifyBoard2UI(): void {
-        // Hide the next piece preview section for board 2
-        const nextPieceCanvas = document.getElementById('next-piece-canvas-2');
-        if (nextPieceCanvas && nextPieceCanvas.parentElement) {
-            nextPieceCanvas.parentElement.style.display = 'none';
-        }
-        
-        // Hide the upgrades section for board 2
-        const upgradesSection = document.getElementById('board-2-upgrades');
-        if (upgradesSection) {
-            upgradesSection.style.display = 'none';
-        }
-        
-        // Hide the force next piece container if it exists
-        const forceNextPieceContainer = document.getElementById('force-next-piece-container-2');
-        if (forceNextPieceContainer) {
-            forceNextPieceContainer.style.display = 'none';
-        }
-        
-        console.log("Board 2 UI simplified - hiding next piece preview and upgrade buttons");
-    }
-
-    /**
-     * Shows an overlay when Board 2 loses (but board 3 is still active)
-     
-    function showBoard2LostOverlay(): void {
-        const overlay = document.createElement('div');
-        overlay.id = 'board-2-lost-overlay';
-        
-        overlay.style.position = 'absolute';
-        overlay.style.top = '0';
-        overlay.style.left = '0';
-        overlay.style.width = '100%';
-        overlay.style.height = '100%';
-        overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
-        overlay.style.display = 'flex';
-        overlay.style.flexDirection = 'column';
-        overlay.style.justifyContent = 'center';
-        overlay.style.alignItems = 'center';
-        overlay.style.zIndex = '100';
-        overlay.style.borderRadius = '12px';
-        
-        const title = document.createElement('h2');
-        title.textContent = 'BOARD 2 LOST';
-        title.style.color = '#ff4444';
-        title.style.fontSize = '16px';
-        title.style.margin = '0 0 10px 0';
-        title.style.fontFamily = 'Arial, sans-serif';
-        
-        const infoText = document.createElement('p');
-        infoText.style.color = '#aaa';
-        infoText.style.fontSize = '10px';
-        infoText.style.margin = '0 0 10px 0';
-        infoText.style.textAlign = 'center';
-        infoText.innerHTML = 'Pay to restart';
-        
-        const resetButton = document.createElement('button');
-        resetButton.id = 'reset-board-2-button';
-        resetButton.textContent = `Reset (${RESET_BOARD_2_COST} pts)`;
-        resetButton.style.padding = '8px 16px';
-        resetButton.style.fontSize = '12px';
-        resetButton.style.fontWeight = 'bold';
-        resetButton.style.backgroundColor = points >= RESET_BOARD_2_COST ? '#4CAF50' : '#888888';
-        resetButton.style.color = 'white';
-        resetButton.style.border = 'none';
-        resetButton.style.borderRadius = '6px';
-        resetButton.style.cursor = points >= RESET_BOARD_2_COST ? 'pointer' : 'not-allowed';
-        resetButton.disabled = points < RESET_BOARD_2_COST;
-        
-        resetButton.addEventListener('click', () => {
-            if (points >= RESET_BOARD_2_COST) {
-                resetBoard2WithUpgrades();
-            }
-        });
-        
-        overlay.appendChild(title);
-        overlay.appendChild(infoText);
-        overlay.appendChild(resetButton);
-        
-        const board2Container = document.getElementById('board-2-container');
-        if (board2Container) {
-            board2Container.style.position = 'relative';
-            board2Container.appendChild(overlay);
-        }
-    }*/
-
-    /**
-     * Updates the Board 2 Lost overlay button state
-     */
-    function updateBoard2LostOverlay(): void {
-        const resetButton = document.getElementById('reset-board-2-button') as HTMLButtonElement;
-        if (!resetButton) return;
-        
-        const canAfford = points >= RESET_BOARD_2_COST;
-        resetButton.disabled = !canAfford;
-        resetButton.style.backgroundColor = canAfford ? '#4CAF50' : '#888888';
-        resetButton.style.cursor = canAfford ? 'pointer' : 'not-allowed';
-    }
-
-    /**
-     * Resets Board 2 with full AI upgrades
-     
-    function resetBoard2WithUpgrades(): void {
-        points -= RESET_BOARD_2_COST;
-        
-        const overlay = document.getElementById('board-2-lost-overlay');
-        if (overlay) {
-            overlay.remove();
-        }
-        
-        isGameOverBoard2 = false;
-        currentPieceBoard2 = null;
-        nextPieceBoard2 = null;
-        totalLinesClearedBoard2 = 0;
-        
-        initializeBoardState(2);
-        
-        aiPlayerHiredBoard2 = true;
-        aiEnabledBoard2 = true;
-        aiHardDropUnlockedBoard2 = true;
-        aiSpeedLevelBoard2 = MAX_AI_SPEED_UPGRADES;
-        aiSpeedBoard2 = BASE_AI_SPEED / Math.pow(1.5, MAX_AI_SPEED_UPGRADES);
-        
-        aiTargetPositionBoard2 = null;
-        aiMovingBoard2 = false;
-        aiLastMoveTimeBoard2 = 0;
-        
-        lastDropTimeBoard2 = performance.now();
-        
-        spawnNewPieceBoard2();
-        
-        updatePointsDisplay();
-        updateBoardStatus(2);
-        
-        console.log("Board 2 reset with full AI upgrades!");
-    }*/
-
-    // AI PLAYER FUNCTIONS
-
-    /**
-     * Evaluates a board state and returns a score
-     * Higher scores mean better positions
-     * This is the "brain" of our AI - it decides what's good or bad
-     */
-    function evaluateBoardState(testBoard: (string | null)[][]): number {
-        let score = 0;
-        
-        // Factor 1: Aggregate Height (lower is better)
-        // We penalize tall stacks because they're risky
-        let totalHeight = 0;
-        let heights: number[] = [];  // Track individual column heights
-        for (let col = 0; col < GRID_WIDTH; col++) {
-            let columnHeight = 0;
-            for (let row = 0; row < GRID_HEIGHT; row++) {
-                if (testBoard[row][col]) {
-                    columnHeight = GRID_HEIGHT - row;
-                    totalHeight += columnHeight;
-                    break;  // Found the highest block in this column
-                }
-            }
-            heights.push(columnHeight);
-        }
-        score -= totalHeight * 0.5;  // Penalty for height
-        
-        // Factor 2: Complete Lines (more is better)
-        // Reward the AI for completing lines
-        let completeLines = 0;
-        for (let row = 0; row < GRID_HEIGHT; row++) {
-            let isComplete = true;
-            for (let col = 0; col < GRID_WIDTH; col++) {
-                if (!testBoard[row][col]) {
-                    isComplete = false;
-                    break;
-                }
-            }
-            if (isComplete) completeLines++;
-        }
-        score += completeLines * 100;  // Big bonus for completing lines!
-        
-        // Factor 3: Holes (fewer is better)
-        // Count empty cells that have filled cells above them
-        let holes = 0;
-        for (let col = 0; col < GRID_WIDTH; col++) {
-            let foundBlock = false;
-            for (let row = 0; row < GRID_HEIGHT; row++) {
-                if (testBoard[row][col]) {
-                    foundBlock = true;
-                } else if (foundBlock) {
-                    holes++;  // Empty cell below a filled cell = hole
-                }
-            }
-        }
-        score -= holes * 30;  // Big penalty for creating holes
-        
-        // Factor 4: Bumpiness (smoother is better)
-        // Measure the difference in height between adjacent columns
-        let bumpiness = 0;
-        for (let col = 1; col < heights.length; col++) {
-            bumpiness += Math.abs(heights[col] - heights[col - 1]);
-        }
-        score -= bumpiness * 1;  // Small penalty for uneven surfaces
-        
-        // Factor 5: Wall bonus (NEW!)
-        // Give a small bonus for pieces touching walls to encourage using full width
-        let wallBonus = 0;
-        for (let row = 0; row < GRID_HEIGHT; row++) {
-            if (testBoard[row][0]) wallBonus += 0.5;  // Left wall
-            if (testBoard[row][GRID_WIDTH - 1]) wallBonus += 0.5;  // Right wall
-        }
-        score += wallBonus;
-        
-        // Factor 6: Empty column penalty (NEW!)
-        // Heavily penalize leaving columns completely empty
-        let emptyColumns = 0;
-        for (let col = 0; col < GRID_WIDTH; col++) {
-            let columnEmpty = true;
-            for (let row = 0; row < GRID_HEIGHT; row++) {
-                if (testBoard[row][col]) {
-                    columnEmpty = false;
-                    break;
-                }
-            }
-            if (columnEmpty) emptyColumns++;
-        }
-        // Only penalize empty columns if the board has a reasonable amount of pieces
-        if (totalHeight > 20) {  // If we have some pieces on the board
-            score -= emptyColumns * 10;  // Penalty for empty columns
-        }
-        
-        return score;
-    }
-
-    function resetSecondBoard(): void {
-    // Remove board 2 container from the DOM
-    const board2Container = document.getElementById('board-2-container');
-    if (board2Container && board2Container.parentElement) {
-        board2Container.parentElement.removeChild(board2Container);
-    }
-
-    // Reset all board 2 state
-    currentPieceBoard2 = null;
-    boardStateBoard2 = [];
-    isGameOverBoard2 = false;
-    nextPieceBoard2 = null;
-    totalLinesClearedBoard2 = 0;
-
-    // Reset board 2 AI + timing
-    //aiPlayerHiredBoard2 = false;
-    aiEnabledBoard2 = false;
-    //aiHardDropUnlockedBoard2 = false;
-    //aiSpeedLevelBoard2 = 0;
-    //aiSpeedBoard2 = BASE_AI_SPEED;
-    //aiLastMoveTimeBoard2 = 0;
-    //aiTargetPositionBoard2 = null;
-    //aiMovingBoard2 = false;
-    lastDropTimeBoard2 = 0;
-
-    // Mark second board as locked again
-    secondBoardUnlocked = false;
-}
-
-
-    /**
-     * Simulates dropping a piece at a specific position
-     * Returns the resulting board state for evaluation
-     */
-    function simulateMove(piece: ActivePiece, targetX: number, rotation: number): (string | null)[][] | null {
-        // Create a deep copy of the current board
-        const testBoard = boardState.map(row => [...row]);
-        
-        // Apply rotations to get the desired shape
-        let testShape = piece.shape;
-        for (let r = 0; r < rotation; r++) {
-            testShape = rotateShape(testShape);
-        }
-        
-        // Create a test piece at the target position
-        const testPiece: ActivePiece = {
-            type: piece.type,
-            shape: testShape,
-            x: targetX,
-            y: 0,
-            color: piece.color
-        };
-        
-        // Check if initial position is valid
-        if (checkCollisionForTest(testPiece, testBoard)) {
-            return null;  // Can't place piece here
-        }
-        
-        // Drop the piece down until it hits something
-        while (!checkCollisionForTest(testPiece, testBoard)) {
-            testPiece.y++;
-        }
-        testPiece.y--;  // Back up one step
-        
-        // Lock the piece into the test board
-        for (let row = 0; row < testPiece.shape.length; row++) {
-            for (let col = 0; col < testPiece.shape[row].length; col++) {
-                if (testPiece.shape[row][col]) {
-                    const boardY = testPiece.y + row;
-                    const boardX = testPiece.x + col;
-                    if (boardY >= 0 && boardY < GRID_HEIGHT && boardX >= 0 && boardX < GRID_WIDTH) {
-                        testBoard[boardY][boardX] = testPiece.color;
-                    }
-                }
-            }
-        }
-        
-        return testBoard;
-    }
-
-    /**
-     * Check collision for testing (doesn't modify the actual game state)
-     */
-    function checkCollisionForTest(piece: ActivePiece, testBoard: (string | null)[][]): boolean {
-        for (let row = 0; row < piece.shape.length; row++) {
-            for (let col = 0; col < piece.shape[row].length; col++) {
-                if (!piece.shape[row][col]) continue;
-                
-                const boardX = piece.x + col;
-                const boardY = piece.y + row;
-                
-                // Check boundaries
-                if (boardX < 0 || boardX >= GRID_WIDTH || boardY >= GRID_HEIGHT) {
-                    return true;
-                }
-                
-                // Check collision with locked pieces
-                if (boardY >= 0 && testBoard[boardY][boardX]) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    /**
-     * Main AI decision function
-     * Determines the best position and rotation for the current piece
-     */
-    function calculateBestMove(): { x: number, rotation: number } | null {
-        if (!currentPiece) return null;
-        
-        let bestScore = -Infinity;
-        let bestMove = null;
-        
-        // Try all possible rotations (0-3)
-        const maxRotations = currentPiece.type === 'O' ? 1 : 4;  // O piece doesn't need rotation
-        
-        for (let rotation = 0; rotation < maxRotations; rotation++) {
-            // Get the shape after rotation
-            let testShape = currentPiece.shape;
-            for (let r = 0; r < rotation; r++) {
-                testShape = rotateShape(testShape);
-            }
-            
-            // Find the actual bounds of the piece (ignoring empty rows/columns)
-            let minCol = testShape[0].length;
-            let maxCol = -1;
-            for (let row = 0; row < testShape.length; row++) {
-                for (let col = 0; col < testShape[row].length; col++) {
-                    if (testShape[row][col]) {
-                        minCol = Math.min(minCol, col);
-                        maxCol = Math.max(maxCol, col);
-                    }
-                }
-            }
-            const actualWidth = maxCol - minCol + 1;
-            const leftOffset = minCol;
-            
-            // Try all possible x positions - INCLUDING negative positions for pieces with offset
-            // This allows pieces to go all the way to the walls
-            for (let x = -leftOffset; x <= GRID_WIDTH - actualWidth - leftOffset; x++) {
-                // Simulate this move
-                const resultBoard = simulateMove(currentPiece, x, rotation);
-                
-                if (resultBoard) {
-                    // Evaluate how good this position is
-                    const score = evaluateBoardState(resultBoard);
-                    
-                    // Is this the best move so far?
-                    if (score > bestScore) {
-                        bestScore = score;
-                        bestMove = { x, rotation };
-                    }
-                }
-            }
-        }
-        
-        // If no valid move was found, just drop at current position
-        if (!bestMove) {
-            console.log("AI: No valid moves found, dropping at current position");
-            bestMove = { x: currentPiece.x, rotation: 0 };
-        }
-        
-        console.log(`AI found best move: x=${bestMove.x}, rotation=${bestMove.rotation}, score=${bestScore.toFixed(2)}`);
-        return bestMove;
-    }
-
-    /**
-     * Executes the AI's planned move step by step
-     * Makes the AI look more natural by moving pieces gradually
-     */
-    function executeAIMove(): void {
-        if (!currentPiece || !aiTargetPosition || !aiEnabled) return;
-        
-        // First, check if we need to rotate
-        // We'll track how many times we've rotated to avoid infinite loops
-        if (!currentPiece.hasOwnProperty('aiRotations')) {
-            (currentPiece as any).aiRotations = 0;
-        }
-        
-        const currentRotations = (currentPiece as any).aiRotations;
-        const targetRotation = aiTargetPosition.rotation;
-        
-        // Step 1: Rotate to target rotation (if needed)
-        if (currentRotations < targetRotation) {
-            if (rotatePiece()) {
-                (currentPiece as any).aiRotations++;
-            } else {
-                // Can't rotate, skip to movement
-                (currentPiece as any).aiRotations = targetRotation;
-            }
-            return;  // Exit early, we'll continue next frame
-        }
-        
-        // Step 2: Move horizontally to target position
-        const currentX = currentPiece.x;
-        const targetX = aiTargetPosition.x;
-        
-        if (currentX !== targetX) {
-            const direction = targetX > currentX ? 1 : -1;
-            
-            // Try to move horizontally
-            if (!movePieceHorizontally(direction)) {
-                // Can't move horizontally, might be blocked
-                // Just drop the piece where it is
-                console.log("AI: Can't reach target position, dropping here");
-                movePieceDown();
-                aiTargetPosition = null;
-                aiMoving = false;
-            }
-            return;  // Exit early, continue next frame
-        }
-        
-        // Step 3: We're in position! Drop the piece
-    if (aiHardDropUnlocked) {
-        // AI has hard drop - instantly place the piece
-        hardDrop();
-    } else {
-        // AI doesn't have hard drop - move down one row at a time
-        movePieceDown();
-    }
-        
-        // Clear the target since we've reached it
-        aiTargetPosition = null;
-        aiMoving = false;
-    }
-
-    // =====================================================
-    // BOARD 2 AI FUNCTIONS
-    // =====================================================
-
-    /**
-     * Simulates placing a piece on board 2 to evaluate the result
-     */
-    function simulateMoveBoard2(piece: ActivePiece, targetX: number, rotation: number): (string | null)[][] | null {
-        // Create a deep copy of board 2's state
-        const testBoard = boardStateBoard2.map(row => [...row]);
-        
-        // Apply rotations to get the desired shape
-        let testShape = piece.shape;
-        for (let r = 0; r < rotation; r++) {
-            testShape = rotateShape(testShape);
-        }
-        
-        // Create a test piece at the target position
-        const testPiece: ActivePiece = {
-            type: piece.type,
-            shape: testShape,
-            x: targetX,
-            y: 0,
-            color: piece.color
-        };
-        
-        // Check if initial position is valid
-        if (checkCollisionForTest(testPiece, testBoard)) {
-            return null;  // Can't place piece here
-        }
-        
-        // Drop the piece down until it hits something
-        while (!checkCollisionForTest(testPiece, testBoard)) {
-            testPiece.y++;
-        }
-        testPiece.y--;  // Back up one step
-        
-        // Lock the piece into the test board
-        for (let row = 0; row < testPiece.shape.length; row++) {
-            for (let col = 0; col < testPiece.shape[row].length; col++) {
-                if (testPiece.shape[row][col]) {
-                    const boardY = testPiece.y + row;
-                    const boardX = testPiece.x + col;
-                    if (boardY >= 0 && boardY < GRID_HEIGHT && boardX >= 0 && boardX < GRID_WIDTH) {
-                        testBoard[boardY][boardX] = testPiece.color;
-                    }
-                }
-            }
-        }
-        
-        return testBoard;
-    }
-
-    /**
-     * Calculates the best move for board 2's AI
-     */
-    function calculateBestMoveBoard2(): { x: number, rotation: number } | null {
-        if (!currentPieceBoard2) return null;
-        
-        let bestScore = -Infinity;
-        let bestMove = null;
-        
-        // Try all possible rotations (0-3)
-        const maxRotations = currentPieceBoard2.type === 'O' ? 1 : 4;
-        
-        for (let rotation = 0; rotation < maxRotations; rotation++) {
-            // Get the shape after rotation
-            let testShape = currentPieceBoard2.shape;
-            for (let r = 0; r < rotation; r++) {
-                testShape = rotateShape(testShape);
-            }
-            
-            // Find the actual bounds of the piece
-            let minCol = testShape[0].length;
-            let maxCol = -1;
-            for (let row = 0; row < testShape.length; row++) {
-                for (let col = 0; col < testShape[row].length; col++) {
-                    if (testShape[row][col]) {
-                        minCol = Math.min(minCol, col);
-                        maxCol = Math.max(maxCol, col);
-                    }
-                }
-            }
-            const actualWidth = maxCol - minCol + 1;
-            const leftOffset = minCol;
-            
-            // Try all possible x positions
-            for (let x = -leftOffset; x <= GRID_WIDTH - actualWidth - leftOffset; x++) {
-                // Simulate this move on board 2
-                const resultBoard = simulateMoveBoard2(currentPieceBoard2, x, rotation);
-                
-                if (resultBoard) {
-                    // Evaluate how good this position is
-                    const score = evaluateBoardState(resultBoard);
-                    
-                    if (score > bestScore) {
-                        bestScore = score;
-                        bestMove = { x, rotation };
-                    }
-                }
-            }
-        }
-        
-        // If no valid move was found, just drop at current position
-        if (!bestMove) {
-            console.log("Board 2 AI: No valid moves found, dropping at current position");
-            bestMove = { x: currentPieceBoard2.x, rotation: 0 };
-        }
-        
-        return bestMove;
-    }
-
-    /**
-     * Executes board 2 AI's planned move step by step
-     */
-    function executeAIMoveBoard2(): void {
-        if (!currentPieceBoard2 || !aiTargetPositionBoard2 || !aiEnabledBoard2) return;
-        
-        // Track rotations to avoid infinite loops
-        if (!currentPieceBoard2.hasOwnProperty('aiRotations')) {
-            (currentPieceBoard2 as any).aiRotations = 0;
-        }
-        
-        const currentRotations = (currentPieceBoard2 as any).aiRotations;
-        const targetRotation = aiTargetPositionBoard2.rotation;
-        
-        // Step 1: Rotate to target rotation (if needed)
-        if (currentRotations < targetRotation) {
-            if (rotatePieceBoard2()) {
-                (currentPieceBoard2 as any).aiRotations++;
-            } else {
-                // Can't rotate, skip to movement
-                (currentPieceBoard2 as any).aiRotations = targetRotation;
-            }
-            return;
-        }
-        
-        // Step 2: Move horizontally to target position
-        const currentX = currentPieceBoard2.x;
-        const targetX = aiTargetPositionBoard2.x;
-        
-        if (currentX !== targetX) {
-            const direction = targetX > currentX ? 1 : -1;
-            
-            if (!movePieceHorizontallyBoard2(direction)) {
-                // Can't move horizontally, just drop
-                console.log("Board 2 AI: Can't reach target position, dropping here");
-                movePieceDownBoard2();
-                aiTargetPositionBoard2 = null;
-                aiMovingBoard2 = false;
-            }
-            return;
-        }
-        
-        // Step 3: We're in position! Drop the piece
-        if (aiHardDropUnlockedBoard2) {
-            hardDropBoard2();
-        } else {
-            movePieceDownBoard2();
-        }
-        
-        // Clear the target
-        aiTargetPositionBoard2 = null;
-        aiMovingBoard2 = false;
-    }
-
-    /**
-     * Main AI control function for board 2
-     * Called every frame to manage board 2's AI behavior
-     */
-    function updateAIBoard2(currentTime: number): void {
-        // Check if AI should be active
-        if (!aiEnabledBoard2 || !currentPieceBoard2) return;
-        
-        // Safety check: if a piece has been active for too long, just drop it
-        if (!currentPieceBoard2.hasOwnProperty('aiStartTime')) {
-            (currentPieceBoard2 as any).aiStartTime = currentTime;
-        }
-        
-        const pieceAge = currentTime - (currentPieceBoard2 as any).aiStartTime;
-        if (pieceAge > 5000) {  // 5 seconds timeout
-            console.log("Board 2 AI: Piece timeout, forcing drop");
-            movePieceDownBoard2();
-            aiTargetPositionBoard2 = null;
-            aiMovingBoard2 = false;
-            return;
-        }
-        
-        // If AI doesn't have a target, calculate one
-        if (!aiTargetPositionBoard2 && !aiMovingBoard2) {
-            aiTargetPositionBoard2 = calculateBestMoveBoard2();
-            aiMovingBoard2 = true;
-            
-            // If no valid move found, just drop the piece
-            if (!aiTargetPositionBoard2) {
-                movePieceDownBoard2();
-                aiMovingBoard2 = false;
-                return;
-            }
-        }
-        
-        // Execute moves at AI speed
-        if (currentTime - aiLastMoveTimeBoard2 > aiSpeedBoard2) {
-            executeAIMoveBoard2();
-            aiLastMoveTimeBoard2 = currentTime;
-        }
-    }
-
-    // =====================================================
-    // BOARD 3 AI FUNCTIONS
-    // =====================================================
-
-    /**
-     * Simulates placing a piece on board 3
-     */
-    function simulateMoveBoard3(piece: ActivePiece, targetX: number, rotation: number): (string | null)[][] | null {
-        const testBoard = boardStateBoard3.map(row => [...row]);
-        
-        let testShape = piece.shape;
-        for (let r = 0; r < rotation; r++) {
-            testShape = rotateShape(testShape);
-        }
-        
-        const testPiece: ActivePiece = {
-            type: piece.type,
-            shape: testShape,
-            x: targetX,
-            y: 0,
-            color: piece.color
-        };
-        
-        if (checkCollisionForTest(testPiece, testBoard)) {
-            return null;
-        }
-        
-        while (!checkCollisionForTest(testPiece, testBoard)) {
-            testPiece.y++;
-        }
-        testPiece.y--;
-        
-        for (let row = 0; row < testPiece.shape.length; row++) {
-            for (let col = 0; col < testPiece.shape[row].length; col++) {
-                if (testPiece.shape[row][col]) {
-                    const boardY = testPiece.y + row;
-                    const boardX = testPiece.x + col;
-                    if (boardY >= 0 && boardY < GRID_HEIGHT && boardX >= 0 && boardX < GRID_WIDTH) {
-                        testBoard[boardY][boardX] = testPiece.color;
-                    }
-                }
-            }
-        }
-        
-        return testBoard;
-    }
-
-    /**
-     * Calculates the best move for board 3's AI
-     */
-    function calculateBestMoveBoard3(): { x: number, rotation: number } | null {
-        if (!currentPieceBoard3) return null;
-        
-        let bestScore = -Infinity;
-        let bestMove = null;
-        
-        const maxRotations = currentPieceBoard3.type === 'O' ? 1 : 4;
-        
-        for (let rotation = 0; rotation < maxRotations; rotation++) {
-            let testShape = currentPieceBoard3.shape;
-            for (let r = 0; r < rotation; r++) {
-                testShape = rotateShape(testShape);
-            }
-            
-            let minCol = testShape[0].length;
-            let maxCol = -1;
-            for (let row = 0; row < testShape.length; row++) {
-                for (let col = 0; col < testShape[row].length; col++) {
-                    if (testShape[row][col]) {
-                        minCol = Math.min(minCol, col);
-                        maxCol = Math.max(maxCol, col);
-                    }
-                }
-            }
-            const actualWidth = maxCol - minCol + 1;
-            const leftOffset = minCol;
-            
-            for (let x = -leftOffset; x <= GRID_WIDTH - actualWidth - leftOffset; x++) {
-                const resultBoard = simulateMoveBoard3(currentPieceBoard3, x, rotation);
-                
-                if (resultBoard) {
-                    const score = evaluateBoardState(resultBoard);
-                    
-                    if (score > bestScore) {
-                        bestScore = score;
-                        bestMove = { x, rotation };
-                    }
-                }
-            }
-        }
-        
-        if (!bestMove) {
-            console.log("Board 3 AI: No valid moves found, dropping at current position");
-            bestMove = { x: currentPieceBoard3.x, rotation: 0 };
-        }
-        
-        return bestMove;
-    }
-
-    /**
-     * Executes board 3 AI's planned move
-     */
-    function executeAIMoveBoard3(): void {
-        if (!currentPieceBoard3 || !aiTargetPositionBoard3 || !aiEnabledBoard3) return;
-        
-        if (!currentPieceBoard3.hasOwnProperty('aiRotations')) {
-            (currentPieceBoard3 as any).aiRotations = 0;
-        }
-        
-        const currentRotations = (currentPieceBoard3 as any).aiRotations;
-        const targetRotation = aiTargetPositionBoard3.rotation;
-        
-        if (currentRotations < targetRotation) {
-            if (rotatePieceBoard3()) {
-                (currentPieceBoard3 as any).aiRotations++;
-            } else {
-                (currentPieceBoard3 as any).aiRotations = targetRotation;
-            }
-            return;
-        }
-        
-        const currentX = currentPieceBoard3.x;
-        const targetX = aiTargetPositionBoard3.x;
-        
-        if (currentX !== targetX) {
-            const direction = targetX > currentX ? 1 : -1;
-            
-            if (!movePieceHorizontallyBoard3(direction)) {
-                console.log("Board 3 AI: Can't reach target position, dropping here");
-                movePieceDownBoard3();
-                aiTargetPositionBoard3 = null;
-                aiMovingBoard3 = false;
-            }
-            return;
-        }
-        
-        if (aiHardDropUnlockedBoard3) {
-            hardDropBoard3();
-        } else {
-            movePieceDownBoard3();
-        }
-        
-        aiTargetPositionBoard3 = null;
-        aiMovingBoard3 = false;
-    }
-
-    /**
-     * Main AI control function for board 3
-     */
-    function updateAIBoard3(currentTime: number): void {
-        if (!aiEnabledBoard3 || !currentPieceBoard3) return;
-        
-        if (!currentPieceBoard3.hasOwnProperty('aiStartTime')) {
-            (currentPieceBoard3 as any).aiStartTime = currentTime;
-        }
-        
-        const pieceAge = currentTime - (currentPieceBoard3 as any).aiStartTime;
-        if (pieceAge > 5000) {
-            console.log("Board 3 AI: Piece timeout, forcing drop");
-            movePieceDownBoard3();
-            aiTargetPositionBoard3 = null;
-            aiMovingBoard3 = false;
-            return;
-        }
-        
-        if (!aiTargetPositionBoard3 && !aiMovingBoard3) {
-            aiTargetPositionBoard3 = calculateBestMoveBoard3();
-            aiMovingBoard3 = true;
-            
-            if (!aiTargetPositionBoard3) {
-                movePieceDownBoard3();
-                aiMovingBoard3 = false;
-                return;
-            }
-        }
-        
-        if (currentTime - aiLastMoveTimeBoard3 > aiSpeedBoard3) {
-            executeAIMoveBoard3();
-            aiLastMoveTimeBoard3 = currentTime;
-        }
-    }
-
-    /**
-     * Main AI control function
-     * Called every frame to manage AI behavior
-     */
-    function updateAI(currentTime: number): void {
-        // Check if AI should be active
-        if (!aiEnabled || !currentPiece) return;
-        
-        // Safety check: if a piece has been active for too long, just drop it
-        if (!currentPiece.hasOwnProperty('aiStartTime')) {
-            (currentPiece as any).aiStartTime = currentTime;
-        }
-        
-        const pieceAge = currentTime - (currentPiece as any).aiStartTime;
-        if (pieceAge > 5000) {  // 5 seconds timeout
-            console.log("AI: Piece timeout, forcing drop");
-            movePieceDown();
-            aiTargetPosition = null;
-            aiMoving = false;
-            return;
-        }
-        
-        // If AI doesn't have a target, calculate one
-        if (!aiTargetPosition && !aiMoving) {
-            aiTargetPosition = calculateBestMove();
-            aiMoving = true;
-            
-            // If no valid move found, just drop the piece
-            if (!aiTargetPosition) {
-                movePieceDown();
-                aiMoving = false;
-                return;
-            }
-        }
-        
-        // Execute moves at AI speed
-        if (currentTime - aiLastMoveTime > aiSpeed) {
-            executeAIMove();
-            aiLastMoveTime = currentTime;
-        }
-    }
-
-    /**
-     * Checks if the game is over (pieces reached the top)
-     * @returns true if game is over
-     
-    function checkGameOver(): boolean {
-        // Check if there are any blocks in the top row
-        for (let col = 0; col < GRID_WIDTH; col++) {
-            if (boardState[0][col]) {
-                return true;  // Game over!
-            }
-        }
-        return false;
-    } */
-
-    /**
-     * Creates a brief visual effect when lines are cleared
-     * This gives satisfying feedback to the player
-     * @param linesCleared - Number of lines that were cleared
-     */
-    function flashEffect(linesCleared: number): void {
-        // Save the current canvas filter
-        const originalFilter = canvas.style.filter;
-        
-        // Apply a brightness filter based on lines cleared
-        // More lines = brighter flash
-        const brightness = 1 + (linesCleared * 0.3);
-        canvas.style.filter = `brightness(${brightness})`;
-        
-        // Remove the effect after a short delay
-        setTimeout(() => {
-            canvas.style.filter = originalFilter;
-        }, 200);  // Flash lasts 200 milliseconds
-    }
-
-
-    /**
-     * Handles keyboard input for controlling pieces
-     * This is what makes the game interactive!
-     */
-    document.addEventListener('keydown', (event: KeyboardEvent) => {
-    // Don't process input if game is paused
+document.addEventListener('keydown', (event: KeyboardEvent) => {
     if (isPaused) return;
-    // Determine which board to control based on activePlayerBoard
-    let boardToControl = 1;
-    if (thirdBoardUnlocked) {
-        boardToControl = activePlayerBoard;
-    } else if (secondBoardUnlocked) {
-        boardToControl = activePlayerBoard;
-    }
+    if (isGameOver) return;
     
-    // Don't allow input if the controlled board is game over
-    if (boardToControl === 1 && isGameOver) return;
-    if (boardToControl === 2 && isGameOverBoard2) return;
-    if (boardToControl === 3 && isGameOverBoard3) return;
+    const activeBoard = boards[activeBoardIndex];
+    if (!activeBoard || activeBoard.isGameOver || activeBoard.aiEnabled) return;
     
-    // Don't allow control if AI is controlling this board
-    if (boardToControl === 1 && aiEnabled) return;
-    if (boardToControl === 2 && aiEnabledBoard2) return;
-    if (boardToControl === 3 && aiEnabledBoard3) return;
-    
-    // Get the current piece for the active board
-    let piece: ActivePiece | null = null;
-    if (boardToControl === 1) {
-        piece = currentPiece;
-    } else if (boardToControl === 2) {
-        piece = currentPieceBoard2;
-    } else {
-        piece = currentPieceBoard3;
-    }
-    if (!piece) return;
-    
-    // Prevent default browser behaviors
     if (['ArrowLeft', 'ArrowRight', 'ArrowDown', 'ArrowUp', ' '].includes(event.key)) {
         event.preventDefault();
     }
     
-    // Handle controls for the active board
-    if (boardToControl === 1) {
-        switch(event.key) {
-            case 'ArrowLeft':
-                movePieceHorizontally(-1);
-                break;
-            case 'ArrowRight':
-                movePieceHorizontally(1);
-                break;
-            case 'ArrowDown':
-                movePieceDown();
-                lastDropTime = performance.now();
-                break;
-            case 'ArrowUp':
-                rotatePiece();
-                break;
-            case ' ':
-                if (hardDropUnlocked) {
-                    hardDrop();
-                }
-                break;
-        }
-    } else if (boardToControl === 2) {
-        switch(event.key) {
-            case 'ArrowLeft':
-                movePieceHorizontallyBoard2(-1);
-                break;
-            case 'ArrowRight':
-                movePieceHorizontallyBoard2(1);
-                break;
-            case 'ArrowDown':
-                movePieceDownBoard2();
-                lastDropTimeBoard2 = performance.now();
-                break;
-            case 'ArrowUp':
-                rotatePieceBoard2();
-                break;
-            case ' ':
-                if (hardDropUnlocked) {
-                    hardDropBoard2();
-                }
-                break;
-        }
-    } else if (boardToControl === 3) {
-        switch(event.key) {
-            case 'ArrowLeft':
-                movePieceHorizontallyBoard3(-1);
-                break;
-            case 'ArrowRight':
-                movePieceHorizontallyBoard3(1);
-                break;
-            case 'ArrowDown':
-                movePieceDownBoard3();
-                lastDropTimeBoard3 = performance.now();
-                break;
-            case 'ArrowUp':
-                rotatePieceBoard3();
-                break;
-            case ' ':
-                if (hardDropUnlocked) {
-                    hardDropBoard3();
-                }
-                break;
-        }
+    switch (event.key) {
+        case 'ArrowLeft':
+            movePieceHorizontally(activeBoard, -1);
+            break;
+        case 'ArrowRight':
+            movePieceHorizontally(activeBoard, 1);
+            break;
+        case 'ArrowDown':
+            movePieceDown(activeBoard);
+            activeBoard.lastDropTime = performance.now();
+            break;
+        case 'ArrowUp':
+            rotatePiece(activeBoard);
+            break;
+        case ' ':
+            if (hardDropUnlocked) {
+                hardDrop(activeBoard);
+            }
+            break;
     }
 });
 
-    /**
-     * The main game loop that runs every frame
-     * Now handles drawing everything, making pieces fall, and AI control!
-     * @param currentTime - The current timestamp (provided by requestAnimationFrame)
-     */
-    /**
-     * The main game loop that runs every frame
-     * Handles drawing, piece falling, and AI control
-     * Stops running when game is over
-     * @param currentTime - The current timestamp (provided by requestAnimationFrame)
-     */
-    function gameLoop(currentTime: number = 0): void {
-    // Skip game updates if paused
-    if (!isPaused) {
-        // BOARD 1 LOGIC
-        if (!isGameOver) {
-            if (aiEnabled) {
-                updateAI(currentTime);
-            } else {
-                const timeSinceDrop = currentTime - lastDropTime;
+// =====================================================
+// MAIN GAME LOOP
+// =====================================================
+
+function gameLoop(currentTime: number = 0): void {
+    if (!isPaused && !isGameOver) {
+        // Update all boards
+        for (const board of boards) {
+            if (board.isGameOver) continue;
+            
+            if (board.aiEnabled) {
+                // AI-controlled board
+                updateAI(board, currentTime);
+            } else if (board.index === activeBoardIndex) {
+                // Player-controlled board - handle automatic dropping
+                const timeSinceDrop = currentTime - board.lastDropTime;
                 if (timeSinceDrop > DROP_SPEED) {
-                    movePieceDown();
-                    lastDropTime = currentTime;
-                }
-            }
-        }
-        
-        // BOARD 2 LOGIC (if it exists)
-        if (secondBoardUnlocked && !isGameOverBoard2) {
-            if (aiEnabledBoard2) {
-                updateAIBoard2(currentTime);
-            } else {
-                // Player controls board 2
-                const timeSinceDropBoard2 = currentTime - lastDropTimeBoard2;
-                if (timeSinceDropBoard2 > DROP_SPEED) {
-                    movePieceDownBoard2();
-                    lastDropTimeBoard2 = currentTime;
-                }
-            }
-        }
-        
-        // BOARD 3 LOGIC (if it exists)
-        if (thirdBoardUnlocked && !isGameOverBoard3) {
-            if (aiEnabledBoard3) {
-                updateAIBoard3(currentTime);
-            } else {
-                // Player controls board 3
-                const timeSinceDropBoard3 = currentTime - lastDropTimeBoard3;
-                if (timeSinceDropBoard3 > DROP_SPEED) {
-                    movePieceDownBoard3();
-                    lastDropTimeBoard3 = currentTime;
+                    movePieceDown(board);
+                    board.lastDropTime = currentTime;
                 }
             }
         }
     }
     
-    // Always draw even when paused (so player can see the game state)
-    // DRAWING BOARD 1
-    drawBoard();
-    drawBoardState();
-    if (!isGameOver) {
-        drawCurrentPiece();
-    }
-    
-    // DRAWING BOARD 2 (if it exists)
-    if (secondBoardUnlocked) {
-        drawBoard2();
-        drawBoardStateBoard2();
-        if (!isGameOverBoard2) {
-            drawCurrentPieceBoard2();
-        }
-    }
-    
-    // DRAWING BOARD 3 (if it exists)
-    if (thirdBoardUnlocked) {
-        drawBoard3();
-        drawBoardStateBoard3();
-        if (!isGameOverBoard3) {
-            drawCurrentPieceBoard3();
+    // Draw all boards
+    for (const board of boards) {
+        drawBoard(board);
+        drawBoardState(board);
+        if (!board.isGameOver && board.currentPiece) {
+            drawCurrentPiece(board);
         }
     }
     
     requestAnimationFrame(gameLoop);
-}  
+}
 
-    // Call initializeBoard when the game starts
-    // Add this right before your gameLoop() call at the bottom
-    initializeBoard();
+// =====================================================
+// INITIALIZATION
+// =====================================================
 
-    // For testing: spawn a piece (but it won't appear yet since we're not drawing it)
-    // Add this right after initializeBoard();
-    spawnNewPiece();
-    // START THE GAME
-    // This kicks off our game loop for the first time
-    gameLoop();
+// Set up canvas
+canvas.width = BOARD_WIDTH + (PADDING * 2);
+canvas.height = BOARD_HEIGHT + (PADDING * 2);
+canvas.style.backgroundColor = '#000000';
+canvas.style.borderRadius = '12px';
+canvas.style.boxShadow = '0 0 20px rgba(0, 0, 0, 0.3)';
+
+// Create first board
+const board0 = createBoard(0);
+board0.canvas = canvas;
+boards.push(board0);
+
+// Create UI
+createGlobalHeader();
+createUI();
+createDialogueSystem();
+createGameOverScreen();
+
+// Start the game
+board0.lastDropTime = performance.now();
+spawnNewPiece(board0);
+
+// Start game loop
+gameLoop();
+
+console.log("Idletris Multi-Board initialized!");
