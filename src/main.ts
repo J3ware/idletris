@@ -1,4 +1,4 @@
-    // main.ts - The entry point for our Idletris game
+// main.ts - The entry point for our Idletris game
 
     // First, we need to tell TypeScript that we're working with the browser's Canvas API
     // The "!" after getElementById tells TypeScript "trust me, this element exists"
@@ -157,6 +157,12 @@ const BOARD_HEIGHT_SMALL = GRID_HEIGHT * CELL_SIZE_SMALL;  // 360px tall (20 * 1
         return aiPlayerHired && aiHardDropUnlocked && aiSpeedLevel >= MAX_AI_SPEED_UPGRADES;
     }
 
+    // Variables to track if requirements for third board are met
+    function checkThirdBoardRequirements(): boolean {
+        // Check if board 2 AI is maxed out
+        return aiPlayerHiredBoard2 && aiHardDropUnlockedBoard2 && aiSpeedLevelBoard2 >= MAX_AI_SPEED_UPGRADES;
+    }
+
     // POINTS SYSTEM VARIABLES
     // Track the player's current spendable points
     let points = 0;
@@ -171,7 +177,7 @@ const BOARD_HEIGHT_SMALL = GRID_HEIGHT * CELL_SIZE_SMALL;  // 360px tall (20 * 1
     let aiHardDropUnlocked = false;  // Track if AI can use hard drop
     const AI_HARD_DROP_COST = 5;  // Cost for AI hard drop upgrade
     let aiSpeedLevel = 0;  // Current speed upgrade level (0-5)
-    const AI_SPEED_UPGRADE_COST = 5;  // Cost to upgrade AI speed
+    const AI_SPEED_UPGRADE_COST = 10;  // Cost to upgrade AI speed
     const MAX_AI_SPEED_UPGRADES = 5;  // Maximum number of speed upgrades
     const BASE_AI_SPEED = 300;  // Starting AI speed in milliseconds
 
@@ -180,7 +186,7 @@ const BOARD_HEIGHT_SMALL = GRID_HEIGHT * CELL_SIZE_SMALL;  // 360px tall (20 * 1
     // =====================================================
     // This upgrade allows players to choose the next piece for a cost
     let forceNextPieceUnlocked = false;  // Track if the upgrade has been purchased (global/permanent)
-    const FORCE_NEXT_PIECE_UNLOCK_COST = 25;  // One-time cost to unlock the feature
+    const FORCE_NEXT_PIECE_UNLOCK_COST = 20;  // One-time cost to unlock the feature
     const FORCE_NEXT_PIECE_USE_COST = 5;  // Cost each time you force a specific piece
 
     // Track if AI player is hired (not functional yet, just for UI)
@@ -205,18 +211,43 @@ const BOARD_HEIGHT_SMALL = GRID_HEIGHT * CELL_SIZE_SMALL;  // 360px tall (20 * 1
     let totalLinesClearedBoard2 = 0;
 
     // Board 2 AI variables (independent from board 1)
-    //let aiPlayerHiredBoard2 = false;
+    let aiPlayerHiredBoard2 = false;
     let aiEnabledBoard2 = false;
-    //let aiHardDropUnlockedBoard2 = false;
-    //let aiSpeedLevelBoard2 = 0;
-    //let aiSpeedBoard2 = BASE_AI_SPEED;
-    //let aiLastMoveTimeBoard2 = 0;
-    //let aiTargetPositionBoard2: { x: number, rotation: number } | null = null;
-    //let aiMovingBoard2 = false;
+    let aiHardDropUnlockedBoard2 = false;
+    let aiSpeedLevelBoard2 = 0;
+    let aiSpeedBoard2 = BASE_AI_SPEED;
+    let aiLastMoveTimeBoard2 = 0;
+    let aiTargetPositionBoard2: { x: number, rotation: number } | null = null;
+    let aiMovingBoard2 = false;
     
 
     // Board 2 timing
     let lastDropTimeBoard2 = 0;
+
+    // THIRD BOARD GAME STATE
+    let thirdBoardUnlocked = false;
+    let currentPieceBoard3: ActivePiece | null = null;
+    let boardStateBoard3: (string | null)[][] = [];
+    let isGameOverBoard3 = false;
+    let nextPieceBoard3: PieceType | null = null;
+    let totalLinesClearedBoard3 = 0;
+
+    // Board 3 AI variables (independent from boards 1 and 2)
+    let aiPlayerHiredBoard3 = false;
+    let aiEnabledBoard3 = false;
+    let aiHardDropUnlockedBoard3 = false;
+    let aiSpeedLevelBoard3 = 0;
+    let aiSpeedBoard3 = BASE_AI_SPEED;
+    let aiLastMoveTimeBoard3 = 0;
+    let aiTargetPositionBoard3: { x: number, rotation: number } | null = null;
+    let aiMovingBoard3 = false;
+
+    // Board 3 timing
+    let lastDropTimeBoard3 = 0;
+
+    // Cost to unlock third board and reset costs
+    const UNLOCK_THIRD_BOARD_COST = 200;
+    const RESET_BOARD_2_COST = 100;
 
     // How many milliseconds between automatic drops (1000ms = 1 second)
     // Lower number = faster falling
@@ -393,9 +424,6 @@ function showDialogue(dialogueId: string, targetElement: HTMLElement | null): vo
     // Don't display if already shown on screen this session
     if (displayedDialogues.has(dialogueId)) return;
     
-    // Mark as displayed
-    displayedDialogues.add(dialogueId);
-    
     // Get the dialogue content
     const content = DIALOGUE_CONTENT[dialogueId];
     if (!content) {
@@ -403,11 +431,14 @@ function showDialogue(dialogueId: string, targetElement: HTMLElement | null): vo
         return;
     }
     
-    // If we're already showing a dialogue, queue this one
+    // If we're already showing a dialogue, queue this one (but don't mark as displayed yet)
     if (currentDialogue) {
         dialogueQueue.push(dialogueId);
         return;
     }
+    
+    // Mark as displayed only when actually showing it
+    displayedDialogues.add(dialogueId);
     
     // Get elements FIRST before pausing
     const overlay = document.getElementById('dialogue-overlay');
@@ -800,6 +831,9 @@ function showTutorialReview(): void {
         
         // Add unlock second board button (hidden initially)
         createUnlockSecondBoardButton();
+        
+        // Add unlock third board button (hidden initially)
+        createUnlockThirdBoardButton();
 
         addTutorialControls();
     }
@@ -882,6 +916,48 @@ function showTutorialReview(): void {
         
         unlockButton.addEventListener('click', () => {
             unlockSecondBoard();
+        });
+        
+        globalUpgradesSection.appendChild(unlockButton);
+    }
+
+    /**
+     * Creates the unlock third board button
+     */
+    function createUnlockThirdBoardButton(): void {
+        const globalUpgradesSection = document.getElementById('global-upgrades');
+        if (!globalUpgradesSection) return;
+        
+        const unlockButton = document.createElement('button');
+        unlockButton.id = 'unlock-third-board-button';
+        unlockButton.textContent = `Unlock 3rd Board (${UNLOCK_THIRD_BOARD_COST} pts)`;
+        unlockButton.style.display = 'none';  // Hidden initially
+        unlockButton.style.padding = '10px 20px';
+        unlockButton.style.fontSize = '14px';
+        unlockButton.style.fontWeight = 'bold';
+        unlockButton.style.backgroundColor = '#9C27B0';  // Purple for board 3
+        unlockButton.style.color = 'white';
+        unlockButton.style.border = 'none';
+        unlockButton.style.borderRadius = '8px';
+        unlockButton.style.cursor = 'pointer';
+        unlockButton.style.transition = 'all 0.3s ease';
+        unlockButton.style.animation = 'pulse 2s infinite';
+        
+        // Add hover effect
+        unlockButton.addEventListener('mouseenter', () => {
+            if (!unlockButton.disabled) {
+                unlockButton.style.backgroundColor = '#7B1FA2';
+                unlockButton.style.transform = 'scale(1.05)';
+            }
+        });
+        
+        unlockButton.addEventListener('mouseleave', () => {
+            unlockButton.style.backgroundColor = unlockButton.disabled ? '#888888' : '#9C27B0';
+            unlockButton.style.transform = 'scale(1)';
+        });
+        
+        unlockButton.addEventListener('click', () => {
+            unlockThirdBoard();
         });
         
         globalUpgradesSection.appendChild(unlockButton);
@@ -1023,18 +1099,18 @@ if (gameArea) {
     }
 
     /**
-     * Creates a minimal UI for board 2 (no next piece preview, no upgrades)
-     * Board 2 is meant to be player-controlled with no upgrade progression
+     * Creates the UI for board 2 with next piece preview and upgrades
+     * Board 2 has its own independent upgrade progression
      */
     function createMinimalBoardUI(boardNumber: number): void {
         const boardContainer = document.getElementById(`board-${boardNumber}-container`);
         if (!boardContainer) return;
         
-        // Create the UI panel for this board (smaller, simpler)
+        // Create the UI panel for this board
         const uiPanel = document.createElement('div');
         uiPanel.id = `board-${boardNumber}-ui`;
-        uiPanel.style.width = '150px';  // Narrower than board 1's UI
-        uiPanel.style.padding = '15px';
+        uiPanel.style.width = '200px';  // Same width as board 1's UI
+        uiPanel.style.padding = '20px';
         uiPanel.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
         uiPanel.style.borderRadius = '12px';
         uiPanel.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.3)';
@@ -1047,51 +1123,72 @@ if (gameArea) {
         boardLabel.style.margin = '0 0 15px 0';
         boardLabel.style.textAlign = 'center';
         boardLabel.style.color = '#2196F3';  // Blue for board 2
-        boardLabel.style.fontSize = '16px';
+        boardLabel.style.fontSize = '18px';
         
-        // Lines cleared counter (this is useful to keep)
+        // Next piece preview for this board
+        const nextPieceSection = document.createElement('div');
+        nextPieceSection.style.marginBottom = '20px';
+        nextPieceSection.style.padding = '15px';
+        nextPieceSection.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+        nextPieceSection.style.borderRadius = '8px';
+        nextPieceSection.innerHTML = `
+            <div style="font-size: 14px; opacity: 0.7; margin-bottom: 10px; text-align: center;">Next Piece</div>
+        `;
+        
+        const nextPieceCanvas = document.createElement('canvas');
+        nextPieceCanvas.id = `next-piece-canvas-${boardNumber}`;
+        nextPieceCanvas.width = 100;
+        nextPieceCanvas.height = 80;
+        nextPieceCanvas.style.display = 'block';
+        nextPieceCanvas.style.margin = '0 auto';
+        nextPieceCanvas.style.border = '2px solid #333';
+        nextPieceCanvas.style.borderRadius = '4px';
+        nextPieceCanvas.style.backgroundColor = '#111';
+        
+        nextPieceSection.appendChild(nextPieceCanvas);
+        
+        // Lines cleared counter
         const statsSection = document.createElement('div');
-        statsSection.style.marginBottom = '15px';
-        statsSection.style.padding = '12px';
+        statsSection.style.marginBottom = '20px';
+        statsSection.style.padding = '15px';
         statsSection.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
         statsSection.style.borderRadius = '8px';
         statsSection.innerHTML = `
-            <div style="font-size: 12px; opacity: 0.7;">Lines Cleared</div>
-            <div style="font-size: 20px; font-weight: bold;">
+            <div style="font-size: 14px; opacity: 0.7;">Lines Cleared</div>
+            <div style="font-size: 24px; font-weight: bold;">
                 <span id="board-${boardNumber}-lines">0</span>
             </div>
         `;
         
-        // Board status (always Player Control for board 2)
+        // Board status (Player/AI)
         const statusSection = document.createElement('div');
         statusSection.id = `board-${boardNumber}-status`;
-        statusSection.style.padding = '8px';
+        statusSection.style.marginBottom = '20px';
+        statusSection.style.padding = '10px';
         statusSection.style.backgroundColor = 'rgba(76, 175, 80, 0.2)';
         statusSection.style.borderRadius = '8px';
         statusSection.style.textAlign = 'center';
-        statusSection.style.fontSize = '12px';
+        statusSection.style.fontSize = '14px';
         statusSection.innerHTML = '<span>🎮 Player Control</span>';
         
-        // Helpful tip for the player
-        const tipSection = document.createElement('div');
-        tipSection.style.marginTop = '15px';
-        tipSection.style.padding = '10px';
-        tipSection.style.backgroundColor = 'rgba(33, 150, 243, 0.1)';
-        tipSection.style.borderRadius = '8px';
-        tipSection.style.fontSize = '11px';
-        tipSection.style.color = '#aaa';
-        tipSection.style.textAlign = 'center';
-        tipSection.style.lineHeight = '1.4';
-        tipSection.innerHTML = 'Use arrow keys<br>to play!';
+        // Upgrades section for this board
+        const upgradesSection = document.createElement('div');
+        upgradesSection.id = `board-${boardNumber}-upgrades`;
+        upgradesSection.style.display = 'flex';
+        upgradesSection.style.flexDirection = 'column';
+        upgradesSection.style.gap = '10px';
         
-        // Assemble the UI panel (NO next piece preview, NO upgrades section)
-        uiPanel.appendChild(boardLabel);
+        // Assemble the UI panel
+        uiPanel.appendChild(nextPieceSection);
         uiPanel.appendChild(statsSection);
         uiPanel.appendChild(statusSection);
-        uiPanel.appendChild(tipSection);
+        uiPanel.appendChild(upgradesSection);
         
         // Add to board container
         boardContainer.appendChild(uiPanel);
+        
+        // Create upgrade buttons for board 2
+        setTimeout(() => createBoardUpgradeButtons(2), 100);
     }
 
     /**
@@ -1220,8 +1317,10 @@ if (gameArea) {
             icon.addEventListener('click', () => {
                 if (boardNumber === 1) {
                     forceNextPiece(pieceType);
-                } else {
+                } else if (boardNumber === 2) {
                     forceNextPieceBoard2(pieceType);
+                } else {
+                    forceNextPieceBoard3(pieceType);
                 }
             });
             
@@ -1312,27 +1411,30 @@ if (gameArea) {
         aiButton.addEventListener('click', () => {
             if (boardNumber === 1) {
                 hireAIPlayer();
+            } else if (boardNumber === 2) {
+                hireAIPlayerBoard2();
             } else {
-                // We'll implement hireAIPlayerBoard2() later
-                console.log(`Hire AI for board ${boardNumber}`);
+                hireAIPlayerBoard3();
             }
         });
         
         aiHardDropButton.addEventListener('click', () => {
         if (boardNumber === 1) {
             purchaseAIHardDrop();
+        } else if (boardNumber === 2) {
+            purchaseAIHardDropBoard2();
         } else {
-            // We'll implement purchaseAIHardDropBoard2() when we add board 2
-            console.log(`Purchase AI Hard Drop for board ${boardNumber}`);
+            purchaseAIHardDropBoard3();
         }
         });
 
         aiSpeedButton.addEventListener('click', () => {
         if (boardNumber === 1) {
             purchaseAISpeedUpgrade();
+        } else if (boardNumber === 2) {
+            purchaseAISpeedUpgradeBoard2();
         } else {
-            // We'll implement purchaseAISpeedUpgradeBoard2() when we add board 2
-            console.log(`Purchase AI Speed Upgrade for board ${boardNumber}`);
+            purchaseAISpeedUpgradeBoard3();
         }
         });
 
@@ -1521,7 +1623,14 @@ if (gameArea) {
         if (!container || !unlockButton || !iconsContainer) return;
         
         // Determine which next piece to check based on board
-        const currentNextPiece = boardNumber === 1 ? nextPiece : nextPieceBoard2;
+        let currentNextPiece: PieceType | null;
+        if (boardNumber === 1) {
+            currentNextPiece = nextPiece;
+        } else if (boardNumber === 2) {
+            currentNextPiece = nextPieceBoard2;
+        } else {
+            currentNextPiece = nextPieceBoard3;
+        }
         
         if (forceNextPieceUnlocked) {
             // Upgrade is unlocked - show piece icons, hide unlock button
@@ -2101,6 +2210,9 @@ function initializeBoardState(boardNumber: number): void {
     if (boardNumber === 2) {
         boardStateBoard2 = newBoardState;
         lastDropTimeBoard2 = performance.now();
+    } else if (boardNumber === 3) {
+        boardStateBoard3 = newBoardState;
+        lastDropTimeBoard3 = performance.now();
     } else {
         boardState = newBoardState;
         lastDropTime = performance.now();
@@ -2428,44 +2540,58 @@ function drawBlock(x: number, y: number, color: string): void {
 function drawBoard2(): void {
     const canvas2 = document.getElementById('game-canvas-2') as HTMLCanvasElement;
     if (!canvas2) return;
-    
+
     const ctx2 = canvas2.getContext('2d');
     if (!ctx2) return;
-    
+
+    // Use small size for board 2 once the third board is unlocked
+    const useSmallSize = thirdBoardUnlocked;
+    const cellSize = useSmallSize ? CELL_SIZE_SMALL : CELL_SIZE;
+    const padding = useSmallSize ? PADDING_SMALL : PADDING;
+    const boardWidth = useSmallSize ? BOARD_WIDTH_SMALL : BOARD_WIDTH;
+    const boardHeight = useSmallSize ? BOARD_HEIGHT_SMALL : BOARD_HEIGHT;
+
+    // Resize canvas if needed (mirrors board 1 logic)
+    if (useSmallSize && canvas2.width !== boardWidth + (padding * 2)) {
+        canvas2.width = boardWidth + (padding * 2);
+        canvas2.height = boardHeight + (padding * 2);
+    }
+
     // Clear the canvas
     ctx2.clearRect(0, 0, canvas2.width, canvas2.height);
-    
-    // Draw background
+
+    // Background
     ctx2.fillStyle = '#000000';
-    ctx2.fillRect(PADDING, PADDING, BOARD_WIDTH, BOARD_HEIGHT);
-    
-    // Draw grid lines
+    ctx2.fillRect(padding, padding, boardWidth, boardHeight);
+
+    // Grid
     ctx2.strokeStyle = '#3b3b3bff';
     ctx2.lineWidth = 1;
-    
+
     // Vertical lines
     for (let col = 0; col <= GRID_WIDTH; col++) {
-        const x = PADDING + (col * CELL_SIZE);
+        const x = padding + (col * cellSize);
         ctx2.beginPath();
-        ctx2.moveTo(x, PADDING);
-        ctx2.lineTo(x, PADDING + BOARD_HEIGHT);
+        ctx2.moveTo(x, padding);
+        ctx2.lineTo(x, padding + boardHeight);
         ctx2.stroke();
     }
-    
+
     // Horizontal lines
     for (let row = 0; row <= GRID_HEIGHT; row++) {
-        const y = PADDING + (row * CELL_SIZE);
+        const y = padding + (row * cellSize);
         ctx2.beginPath();
-        ctx2.moveTo(PADDING, y);
-        ctx2.lineTo(PADDING + BOARD_WIDTH, y);
+        ctx2.moveTo(padding, y);
+        ctx2.lineTo(padding + boardWidth, y);
         ctx2.stroke();
     }
-    
+
     // Border
     ctx2.strokeStyle = '#666666';
-    ctx2.lineWidth = 2;
-    ctx2.strokeRect(PADDING, PADDING, BOARD_WIDTH, BOARD_HEIGHT);
+    ctx2.lineWidth = useSmallSize ? 1 : 2;
+    ctx2.strokeRect(padding, padding, boardWidth, boardHeight);
 }
+
 
 /**
  * Draws a block on board 2
@@ -2473,34 +2599,40 @@ function drawBoard2(): void {
 function drawBlockBoard2(x: number, y: number, color: string): void {
     const canvas2 = document.getElementById('game-canvas-2') as HTMLCanvasElement;
     if (!canvas2) return;
-    
+
     const ctx2 = canvas2.getContext('2d');
     if (!ctx2) return;
-    
-    const pixelX = PADDING + (x * CELL_SIZE);
-    const pixelY = PADDING + (y * CELL_SIZE);
-    
+
+    // Small mode when the third board is unlocked
+    const useSmallSize = thirdBoardUnlocked;
+    const cellSize = useSmallSize ? CELL_SIZE_SMALL : CELL_SIZE;
+    const padding = useSmallSize ? PADDING_SMALL : PADDING;
+
+    const pixelX = padding + (x * cellSize);
+    const pixelY = padding + (y * cellSize);
+
     // Main block
     ctx2.fillStyle = color;
-    ctx2.fillRect(pixelX, pixelY, CELL_SIZE, CELL_SIZE);
-    
-    // 3D effect - light border
-    ctx2.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-    ctx2.lineWidth = 2;
+    ctx2.fillRect(pixelX, pixelY, cellSize, cellSize);
+
+    // Light border
+    ctx2.strokeStyle = "rgba(255, 255, 255, 0.3)";
+    ctx2.lineWidth = useSmallSize ? 1 : 2;
     ctx2.beginPath();
-    ctx2.moveTo(pixelX, pixelY + CELL_SIZE);
+    ctx2.moveTo(pixelX, pixelY + cellSize);
     ctx2.lineTo(pixelX, pixelY);
-    ctx2.lineTo(pixelX + CELL_SIZE, pixelY);
+    ctx2.lineTo(pixelX + cellSize, pixelY);
     ctx2.stroke();
-    
-    // 3D effect - dark border
-    ctx2.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+
+    // Dark border
+    ctx2.strokeStyle = "rgba(0, 0, 0, 0.3)";
     ctx2.beginPath();
-    ctx2.moveTo(pixelX + CELL_SIZE, pixelY);
-    ctx2.lineTo(pixelX + CELL_SIZE, pixelY + CELL_SIZE);
-    ctx2.lineTo(pixelX, pixelY + CELL_SIZE);
+    ctx2.moveTo(pixelX + cellSize, pixelY);
+    ctx2.lineTo(pixelX + cellSize, pixelY + cellSize);
+    ctx2.lineTo(pixelX, pixelY + cellSize);
     ctx2.stroke();
 }
+
 
 /**
  * Draws board 2's current piece
@@ -2541,7 +2673,14 @@ function drawBoardStateBoard2(): void {
     const previewCanvas = document.getElementById(`next-piece-canvas-${boardNumber}`) as HTMLCanvasElement;
     
     // Determine which next piece to show
-    const pieceToShow = boardNumber === 1 ? nextPiece : nextPieceBoard2;
+    let pieceToShow: PieceType | null;
+    if (boardNumber === 1) {
+        pieceToShow = nextPiece;
+    } else if (boardNumber === 2) {
+        pieceToShow = nextPieceBoard2;
+    } else {
+        pieceToShow = nextPieceBoard3;
+    }
     
     if (!previewCanvas || !pieceToShow) return;
     
@@ -2975,6 +3114,330 @@ function clearLinesBoard2(): number {
     return linesCleared;
 }
 
+// =====================================================
+// BOARD 3 GAME FUNCTIONS
+// =====================================================
+
+/**
+ * Spawns a new piece for board 3
+ */
+function spawnNewPieceBoard3(): void {
+    if (nextPieceBoard3 === null) {
+        const pieceTypes = Object.keys(PIECES) as PieceType[];
+        nextPieceBoard3 = pieceTypes[Math.floor(Math.random() * pieceTypes.length)];
+    }
+    
+    const pieceType = nextPieceBoard3;
+    
+    currentPieceBoard3 = {
+        type: pieceType,
+        shape: PIECES[pieceType],
+        x: Math.floor(GRID_WIDTH / 2) - 1,
+        y: 0,
+        color: PIECE_COLORS[pieceType]
+    };
+    
+    if (checkCollisionBoard3()) {
+        isGameOverBoard3 = true;
+        currentPieceBoard3 = null;
+        
+        if (aiEnabledBoard3) {
+            aiEnabledBoard3 = false;
+            aiTargetPositionBoard3 = null;
+            aiMovingBoard3 = false;
+        }
+        
+        console.log("GAME OVER on Board 3!");
+        showGameOverScreen();
+        return;
+    }
+    
+    const pieceTypes = Object.keys(PIECES) as PieceType[];
+    nextPieceBoard3 = pieceTypes[Math.floor(Math.random() * pieceTypes.length)];
+    
+    updateNextPiecePreview(3);
+    
+    console.log(`Board 3: Spawned piece: ${pieceType}, Next piece: ${nextPieceBoard3}`);
+}
+
+/**
+ * Checks collision for board 3's current piece
+ */
+function checkCollisionBoard3(): boolean {
+    if (!currentPieceBoard3) return false;
+    
+    for (let row = 0; row < currentPieceBoard3.shape.length; row++) {
+        for (let col = 0; col < currentPieceBoard3.shape[row].length; col++) {
+            if (!currentPieceBoard3.shape[row][col]) continue;
+            
+            const boardX = currentPieceBoard3.x + col;
+            const boardY = currentPieceBoard3.y + row;
+            
+            if (boardX < 0 || boardX >= GRID_WIDTH || boardY >= GRID_HEIGHT) {
+                return true;
+            }
+            
+            if (boardY >= 0 && boardStateBoard3[boardY][boardX]) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/**
+ * Moves board 3's piece down
+ */
+function movePieceDownBoard3(): boolean {
+    if (!currentPieceBoard3) return false;
+    
+    currentPieceBoard3.y++;
+    
+    if (checkCollisionBoard3()) {
+        currentPieceBoard3.y--;
+        lockPieceBoard3();
+        spawnNewPieceBoard3();
+        return false;
+    }
+    
+    return true;
+}
+
+/**
+ * Moves board 3's piece horizontally
+ */
+function movePieceHorizontallyBoard3(direction: number): boolean {
+    if (!currentPieceBoard3) return false;
+    
+    const originalX = currentPieceBoard3.x;
+    currentPieceBoard3.x += direction;
+    
+    if (checkCollisionBoard3()) {
+        currentPieceBoard3.x = originalX;
+        return false;
+    }
+    
+    return true;
+}
+
+/**
+ * Rotates board 3's piece
+ */
+function rotatePieceBoard3(): boolean {
+    if (!currentPieceBoard3) return false;
+    
+    if (currentPieceBoard3.type === 'O') return false;
+    
+    const originalShape = currentPieceBoard3.shape;
+    currentPieceBoard3.shape = rotateShape(currentPieceBoard3.shape);
+    
+    if (!checkCollisionBoard3()) {
+        return true;
+    }
+    
+    // Wall kicks
+    currentPieceBoard3.x -= 1;
+    if (!checkCollisionBoard3()) return true;
+    
+    currentPieceBoard3.x += 2;
+    if (!checkCollisionBoard3()) return true;
+    
+    currentPieceBoard3.x -= 1;
+    currentPieceBoard3.y -= 1;
+    if (!checkCollisionBoard3()) return true;
+    
+    // Revert
+    currentPieceBoard3.y += 1;
+    currentPieceBoard3.shape = originalShape;
+    return false;
+}
+
+/**
+ * Hard drops board 3's piece
+ */
+function hardDropBoard3(): void {
+    if (!currentPieceBoard3) return;
+    
+    while (!checkCollisionBoard3()) {
+        currentPieceBoard3.y++;
+    }
+    
+    currentPieceBoard3.y--;
+    lockPieceBoard3();
+    spawnNewPieceBoard3();
+    lastDropTimeBoard3 = performance.now();
+}
+
+/**
+ * Locks board 3's piece in place
+ */
+function lockPieceBoard3(): void {
+    if (!currentPieceBoard3) return;
+    
+    for (let row = 0; row < currentPieceBoard3.shape.length; row++) {
+        for (let col = 0; col < currentPieceBoard3.shape[row].length; col++) {
+            if (currentPieceBoard3.shape[row][col]) {
+                const boardY = currentPieceBoard3.y + row;
+                const boardX = currentPieceBoard3.x + col;
+                
+                if (boardY >= 0) {
+                    boardStateBoard3[boardY][boardX] = currentPieceBoard3.color;
+                }
+            }
+        }
+    }
+    
+    currentPieceBoard3 = null;
+    clearLinesBoard3();
+}
+
+/**
+ * Clears completed lines on board 3
+ */
+function clearLinesBoard3(): number {
+    let linesCleared = 0;
+    
+    for (let row = GRID_HEIGHT - 1; row >= 0; row--) {
+        let isLineFull = true;
+        
+        for (let col = 0; col < GRID_WIDTH; col++) {
+            if (!boardStateBoard3[row][col]) {
+                isLineFull = false;
+                break;
+            }
+        }
+        
+        if (isLineFull) {
+            boardStateBoard3.splice(row, 1);
+            const newRow: (string | null)[] = new Array(GRID_WIDTH).fill(null);
+            boardStateBoard3.unshift(newRow);
+            linesCleared++;
+            row++;
+        }
+    }
+    
+    if (linesCleared > 0) {
+        points += linesCleared;
+        totalLinesClearedBoard3 += linesCleared;
+        updatePointsDisplay();
+        
+        // Flash effect for board 3
+        const canvas3 = document.getElementById('game-canvas-3') as HTMLCanvasElement;
+        if (canvas3) {
+            const originalFilter = canvas3.style.filter;
+            const brightness = 1 + (linesCleared * 0.3);
+            canvas3.style.filter = `brightness(${brightness})`;
+            setTimeout(() => {
+                canvas3.style.filter = originalFilter;
+            }, 200);
+        }
+    }
+    
+    return linesCleared;
+}
+
+/**
+ * Draws board 3's game board
+ */
+function drawBoard3(): void {
+    const canvas3 = document.getElementById('game-canvas-3') as HTMLCanvasElement;
+    if (!canvas3) return;
+    
+    const ctx3 = canvas3.getContext('2d');
+    if (!ctx3) return;
+    
+    ctx3.clearRect(0, 0, canvas3.width, canvas3.height);
+    
+    ctx3.fillStyle = '#000000';
+    ctx3.fillRect(PADDING, PADDING, BOARD_WIDTH, BOARD_HEIGHT);
+    
+    ctx3.strokeStyle = '#3b3b3bff';
+    ctx3.lineWidth = 1;
+    
+    for (let col = 0; col <= GRID_WIDTH; col++) {
+        const x = PADDING + (col * CELL_SIZE);
+        ctx3.beginPath();
+        ctx3.moveTo(x, PADDING);
+        ctx3.lineTo(x, PADDING + BOARD_HEIGHT);
+        ctx3.stroke();
+    }
+    
+    for (let row = 0; row <= GRID_HEIGHT; row++) {
+        const y = PADDING + (row * CELL_SIZE);
+        ctx3.beginPath();
+        ctx3.moveTo(PADDING, y);
+        ctx3.lineTo(PADDING + BOARD_WIDTH, y);
+        ctx3.stroke();
+    }
+    
+    ctx3.strokeStyle = '#666666';
+    ctx3.lineWidth = 2;
+    ctx3.strokeRect(PADDING, PADDING, BOARD_WIDTH, BOARD_HEIGHT);
+}
+
+/**
+ * Draws a block on board 3
+ */
+function drawBlockBoard3(x: number, y: number, color: string): void {
+    const canvas3 = document.getElementById('game-canvas-3') as HTMLCanvasElement;
+    if (!canvas3) return;
+    
+    const ctx3 = canvas3.getContext('2d');
+    if (!ctx3) return;
+    
+    const pixelX = PADDING + (x * CELL_SIZE);
+    const pixelY = PADDING + (y * CELL_SIZE);
+    
+    ctx3.fillStyle = color;
+    ctx3.fillRect(pixelX, pixelY, CELL_SIZE, CELL_SIZE);
+    
+    ctx3.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx3.lineWidth = 2;
+    ctx3.beginPath();
+    ctx3.moveTo(pixelX, pixelY + CELL_SIZE);
+    ctx3.lineTo(pixelX, pixelY);
+    ctx3.lineTo(pixelX + CELL_SIZE, pixelY);
+    ctx3.stroke();
+    
+    ctx3.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx3.beginPath();
+    ctx3.moveTo(pixelX + CELL_SIZE, pixelY);
+    ctx3.lineTo(pixelX + CELL_SIZE, pixelY + CELL_SIZE);
+    ctx3.lineTo(pixelX, pixelY + CELL_SIZE);
+    ctx3.stroke();
+}
+
+/**
+ * Draws board 3's current piece
+ */
+function drawCurrentPieceBoard3(): void {
+    if (!currentPieceBoard3) return;
+    
+    for (let row = 0; row < currentPieceBoard3.shape.length; row++) {
+        for (let col = 0; col < currentPieceBoard3.shape[row].length; col++) {
+            if (currentPieceBoard3.shape[row][col]) {
+                const boardX = currentPieceBoard3.x + col;
+                const boardY = currentPieceBoard3.y + row;
+                drawBlockBoard3(boardX, boardY, currentPieceBoard3.color);
+            }
+        }
+    }
+}
+
+/**
+ * Draws board 3's locked pieces
+ */
+function drawBoardStateBoard3(): void {
+    for (let row = 0; row < GRID_HEIGHT; row++) {
+        for (let col = 0; col < GRID_WIDTH; col++) {
+            const blockColor = boardStateBoard3[row][col];
+            if (blockColor) {
+                drawBlockBoard3(col, row, blockColor);
+            }
+        }
+    }
+}
+
     /**
      * Checks for and clears any completed lines
      * This is the core scoring mechanic of Idletris!
@@ -3048,13 +3511,39 @@ function clearLinesBoard2(): number {
             board1LinesElement.textContent = totalLinesCleared.toString();
         }
         
+        // Update board 2 lines (if board 2 exists)
+        const board2LinesElement = document.getElementById('board-2-lines');
+        if (board2LinesElement) {
+            board2LinesElement.textContent = totalLinesClearedBoard2.toString();
+        }
+        
+        // Update board 3 lines (if board 3 exists)
+        const board3LinesElement = document.getElementById('board-3-lines');
+        if (board3LinesElement) {
+            board3LinesElement.textContent = totalLinesClearedBoard3.toString();
+        }
+        
         // Update all the buttons
         updateGlobalHardDropButton();
         updateUnlockSecondBoardButton();
+        updateUnlockThirdBoardButton();
         updateBoard1Buttons();
+        
+        // Update board 2 buttons if second board is unlocked
+        if (secondBoardUnlocked) {
+            updateBoard2Buttons();
+        }
+        
+        // Update board 3 buttons if third board is unlocked
+        if (thirdBoardUnlocked) {
+            updateBoard3Buttons();
+        }
         
         // Update the Board 1 Lost overlay if it exists (so button enables when affordable)
         updateBoard1LostOverlay();
+        
+        // Update the Board 2 Lost overlay if it exists
+        updateBoard2LostOverlay();
     }
 
     /**
@@ -3122,6 +3611,39 @@ function clearLinesBoard2(): number {
     }
 
     /**
+     * Updates the unlock third board button visibility
+     */
+    function updateUnlockThirdBoardButton(): void {
+        const unlockButton = document.getElementById('unlock-third-board-button') as HTMLButtonElement;
+        if (!unlockButton) return;
+        
+        // Check if requirements are met and board not already unlocked
+        if (secondBoardUnlocked && !thirdBoardUnlocked && checkThirdBoardRequirements()) {
+            if (points >= UNLOCK_THIRD_BOARD_COST) {
+                // Can unlock - show button
+                unlockButton.style.display = 'block';
+                unlockButton.style.backgroundColor = '#9C27B0';
+                unlockButton.style.cursor = 'pointer';
+                unlockButton.disabled = false;
+                unlockButton.textContent = `Unlock 3rd Board (${UNLOCK_THIRD_BOARD_COST} pts)`;
+            } else {
+                // Requirements met but not enough points - show disabled
+                unlockButton.style.display = 'block';
+                unlockButton.style.backgroundColor = '#888888';
+                unlockButton.style.cursor = 'not-allowed';
+                unlockButton.disabled = true;
+                unlockButton.textContent = `Unlock 3rd Board (need ${UNLOCK_THIRD_BOARD_COST} pts)`;
+            }
+        } else if (thirdBoardUnlocked) {
+            // Already unlocked - hide button
+            unlockButton.style.display = 'none';
+        } else {
+            // Requirements not met - hide button
+            unlockButton.style.display = 'none';
+        }
+    }
+
+    /**
      * Updates all board 1 specific buttons
      */
     function updateBoard1Buttons(): void {
@@ -3138,7 +3660,6 @@ function clearLinesBoard2(): number {
     const aiButton = document.getElementById(`ai-button-${boardNumber}`) as HTMLButtonElement;
     if (!aiButton) return;
     
-    // For now, only board 1 logic
     if (boardNumber === 1) {
         if (aiPlayerHired && aiEnabled) {
             aiButton.textContent = '🤖 AI Active';
@@ -3158,6 +3679,38 @@ function clearLinesBoard2(): number {
             if (wasHidden && !shownDialogues.has('hire-ai-1')) {
                 showDialogue('hire-ai-1', aiButton);
             }
+        } else {
+            aiButton.style.display = 'none';
+        }
+    } else if (boardNumber === 2) {
+        if (aiPlayerHiredBoard2 && aiEnabledBoard2) {
+            aiButton.textContent = '🤖 AI Active';
+            aiButton.style.display = 'block';
+            aiButton.style.backgroundColor = '#888888';
+            aiButton.style.cursor = 'default';
+            aiButton.disabled = true;
+        } else if (points >= AI_PLAYER_COST && !aiPlayerHiredBoard2) {
+            aiButton.style.display = 'block';
+            aiButton.style.backgroundColor = '#4CAF50';
+            aiButton.style.cursor = 'pointer';
+            aiButton.disabled = false;
+            aiButton.textContent = `Hire AI (${AI_PLAYER_COST} pts)`;
+        } else {
+            aiButton.style.display = 'none';
+        }
+    } else if (boardNumber === 3) {
+        if (aiPlayerHiredBoard3 && aiEnabledBoard3) {
+            aiButton.textContent = '🤖 AI Active';
+            aiButton.style.display = 'block';
+            aiButton.style.backgroundColor = '#888888';
+            aiButton.style.cursor = 'default';
+            aiButton.disabled = true;
+        } else if (points >= AI_PLAYER_COST && !aiPlayerHiredBoard3) {
+            aiButton.style.display = 'block';
+            aiButton.style.backgroundColor = '#4CAF50';
+            aiButton.style.cursor = 'pointer';
+            aiButton.disabled = false;
+            aiButton.textContent = `Hire AI (${AI_PLAYER_COST} pts)`;
         } else {
             aiButton.style.display = 'none';
         }
@@ -3194,6 +3747,40 @@ function clearLinesBoard2(): number {
         } else {
             aiHardDropButton.style.display = 'none';
         }
+    } else if (boardNumber === 2) {
+        if (!aiPlayerHiredBoard2) {
+            aiHardDropButton.style.display = 'none';
+        } else if (aiHardDropUnlockedBoard2) {
+            aiHardDropButton.textContent = 'AI Hard Drop ✓';
+            aiHardDropButton.style.display = 'block';
+            aiHardDropButton.style.backgroundColor = '#888888';
+            aiHardDropButton.style.cursor = 'default';
+            aiHardDropButton.disabled = true;
+        } else if (points >= AI_HARD_DROP_COST) {
+            aiHardDropButton.style.display = 'block';
+            aiHardDropButton.style.backgroundColor = '#FF9800';
+            aiHardDropButton.style.cursor = 'pointer';
+            aiHardDropButton.disabled = false;
+        } else {
+            aiHardDropButton.style.display = 'none';
+        }
+    } else if (boardNumber === 3) {
+        if (!aiPlayerHiredBoard3) {
+            aiHardDropButton.style.display = 'none';
+        } else if (aiHardDropUnlockedBoard3) {
+            aiHardDropButton.textContent = 'AI Hard Drop ✓';
+            aiHardDropButton.style.display = 'block';
+            aiHardDropButton.style.backgroundColor = '#888888';
+            aiHardDropButton.style.cursor = 'default';
+            aiHardDropButton.disabled = true;
+        } else if (points >= AI_HARD_DROP_COST) {
+            aiHardDropButton.style.display = 'block';
+            aiHardDropButton.style.backgroundColor = '#FF9800';
+            aiHardDropButton.style.cursor = 'pointer';
+            aiHardDropButton.disabled = false;
+        } else {
+            aiHardDropButton.style.display = 'none';
+        }
     }
 }
 
@@ -3225,6 +3812,42 @@ function clearLinesBoard2(): number {
             if (wasHidden && !shownDialogues.has('ai-speed-1')) {
                 showDialogue('ai-speed-1', aiSpeedButton);
             }
+        } else {
+            aiSpeedButton.style.display = 'none';
+        }
+    } else if (boardNumber === 2) {
+        if (!aiPlayerHiredBoard2) {
+            aiSpeedButton.style.display = 'none';
+        } else if (aiSpeedLevelBoard2 >= MAX_AI_SPEED_UPGRADES) {
+            aiSpeedButton.textContent = 'AI Speed MAX ✓';
+            aiSpeedButton.style.display = 'block';
+            aiSpeedButton.style.backgroundColor = '#888888';
+            aiSpeedButton.style.cursor = 'default';
+            aiSpeedButton.disabled = true;
+        } else if (points >= AI_SPEED_UPGRADE_COST) {
+            aiSpeedButton.style.display = 'block';
+            aiSpeedButton.style.backgroundColor = '#00BCD4';
+            aiSpeedButton.style.cursor = 'pointer';
+            aiSpeedButton.disabled = false;
+            aiSpeedButton.textContent = `AI Speed Lv${aiSpeedLevelBoard2 + 1} (${AI_SPEED_UPGRADE_COST} pts)`;
+        } else {
+            aiSpeedButton.style.display = 'none';
+        }
+    } else if (boardNumber === 3) {
+        if (!aiPlayerHiredBoard3) {
+            aiSpeedButton.style.display = 'none';
+        } else if (aiSpeedLevelBoard3 >= MAX_AI_SPEED_UPGRADES) {
+            aiSpeedButton.textContent = 'AI Speed MAX ✓';
+            aiSpeedButton.style.display = 'block';
+            aiSpeedButton.style.backgroundColor = '#888888';
+            aiSpeedButton.style.cursor = 'default';
+            aiSpeedButton.disabled = true;
+        } else if (points >= AI_SPEED_UPGRADE_COST) {
+            aiSpeedButton.style.display = 'block';
+            aiSpeedButton.style.backgroundColor = '#00BCD4';
+            aiSpeedButton.style.cursor = 'pointer';
+            aiSpeedButton.disabled = false;
+            aiSpeedButton.textContent = `AI Speed Lv${aiSpeedLevelBoard3 + 1} (${AI_SPEED_UPGRADE_COST} pts)`;
         } else {
             aiSpeedButton.style.display = 'none';
         }
@@ -3339,6 +3962,231 @@ function clearLinesBoard2(): number {
 }
 
     /**
+     * Handles hiring the AI player for board 2
+     */
+    function hireAIPlayerBoard2(): void {
+        if (points < AI_PLAYER_COST) {
+            console.log("Not enough points for Board 2 AI!");
+            return;
+        }
+        
+        points -= AI_PLAYER_COST;
+        
+        aiPlayerHiredBoard2 = true;
+        aiEnabledBoard2 = true;
+        
+        // Switch player control away from board 2 since AI now controls it
+        activePlayerBoard = 1;  // This may need adjustment based on your game logic
+        
+        updateBoardStatus(2);
+        updatePointsDisplay();
+        updateBoard2Buttons();
+        
+        console.log("AI Player hired for Board 2!");
+        
+        const canvas2 = document.getElementById('game-canvas-2') as HTMLCanvasElement;
+        if (canvas2) {
+            canvas2.style.transition = 'box-shadow 0.5s ease';
+            canvas2.style.boxShadow = '0 0 40px rgba(76,175,80,0.8)';
+            
+            setTimeout(() => {
+                canvas2.style.boxShadow = '0 0 20px rgba(0,0,0,0.3)';
+            }, 500);
+        }
+    }
+
+    /**
+     * Handles purchasing AI hard drop for board 2
+     */
+    function purchaseAIHardDropBoard2(): void {
+        if (!aiPlayerHiredBoard2) {
+            console.log("Must hire AI first for Board 2!");
+            return;
+        }
+        
+        if (points < AI_HARD_DROP_COST) {
+            console.log("Not enough points for Board 2 AI Hard Drop!");
+            return;
+        }
+        
+        points -= AI_HARD_DROP_COST;
+        aiHardDropUnlockedBoard2 = true;
+        
+        updatePointsDisplay();
+        updateBoard2Buttons();
+        
+        console.log("AI Hard Drop unlocked for Board 2!");
+    }
+
+    /**
+     * Handles purchasing AI speed upgrade for board 2
+     */
+    function purchaseAISpeedUpgradeBoard2(): void {
+        if (!aiPlayerHiredBoard2) {
+            console.log("Must hire AI first for Board 2!");
+            return;
+        }
+        
+        if (aiSpeedLevelBoard2 >= MAX_AI_SPEED_UPGRADES) {
+            console.log("Board 2 AI Speed already maxed!");
+            return;
+        }
+        
+        if (points < AI_SPEED_UPGRADE_COST) {
+            console.log("Not enough points for Board 2 AI Speed!");
+            return;
+        }
+        
+        points -= AI_SPEED_UPGRADE_COST;
+        aiSpeedLevelBoard2++;
+        
+        // Calculate new speed (faster with each upgrade)
+        aiSpeedBoard2 = BASE_AI_SPEED / Math.pow(1.5, aiSpeedLevelBoard2);
+        
+        updatePointsDisplay();
+        updateBoard2Buttons();
+        
+        console.log(`Board 2 AI Speed upgraded to level ${aiSpeedLevelBoard2}!`);
+    }
+
+    // =====================================================
+    // BOARD 3 HIRE AND UPGRADE FUNCTIONS
+    // =====================================================
+
+    /**
+     * Handles hiring the AI player for board 3
+     */
+    function hireAIPlayerBoard3(): void {
+        if (points < AI_PLAYER_COST) {
+            console.log("Not enough points for Board 3 AI!");
+            return;
+        }
+        
+        points -= AI_PLAYER_COST;
+        
+        aiPlayerHiredBoard3 = true;
+        aiEnabledBoard3 = true;
+        
+        updateBoardStatus(3);
+        updatePointsDisplay();
+        updateBoard3Buttons();
+        
+        console.log("AI Player hired for Board 3!");
+        
+        const canvas3 = document.getElementById('game-canvas-3') as HTMLCanvasElement;
+        if (canvas3) {
+            canvas3.style.transition = 'box-shadow 0.5s ease';
+            canvas3.style.boxShadow = '0 0 40px rgba(76,175,80,0.8)';
+            
+            setTimeout(() => {
+                canvas3.style.boxShadow = '0 0 20px rgba(0,0,0,0.3)';
+            }, 500);
+        }
+    }
+
+    /**
+     * Handles purchasing AI hard drop for board 3
+     */
+    function purchaseAIHardDropBoard3(): void {
+        if (!aiPlayerHiredBoard3) {
+            console.log("Must hire AI first for Board 3!");
+            return;
+        }
+        
+        if (points < AI_HARD_DROP_COST) {
+            console.log("Not enough points for Board 3 AI Hard Drop!");
+            return;
+        }
+        
+        points -= AI_HARD_DROP_COST;
+        aiHardDropUnlockedBoard3 = true;
+        
+        updatePointsDisplay();
+        updateBoard3Buttons();
+        
+        console.log("AI Hard Drop unlocked for Board 3!");
+    }
+
+    /**
+     * Handles purchasing AI speed upgrade for board 3
+     */
+    function purchaseAISpeedUpgradeBoard3(): void {
+        if (!aiPlayerHiredBoard3) {
+            console.log("Must hire AI first for Board 3!");
+            return;
+        }
+        
+        if (aiSpeedLevelBoard3 >= MAX_AI_SPEED_UPGRADES) {
+            console.log("Board 3 AI Speed already maxed!");
+            return;
+        }
+        
+        if (points < AI_SPEED_UPGRADE_COST) {
+            console.log("Not enough points for Board 3 AI Speed!");
+            return;
+        }
+        
+        points -= AI_SPEED_UPGRADE_COST;
+        aiSpeedLevelBoard3++;
+        
+        // Calculate new speed (faster with each upgrade)
+        aiSpeedBoard3 = BASE_AI_SPEED / Math.pow(1.5, aiSpeedLevelBoard3);
+        
+        updatePointsDisplay();
+        updateBoard3Buttons();
+        
+        console.log(`Board 3 AI Speed upgraded to level ${aiSpeedLevelBoard3}!`);
+    }
+
+    /**
+     * Force next piece for board 3
+     */
+    function forceNextPieceBoard3(pieceType: PieceType): void {
+        if (!forceNextPieceUnlocked) {
+            console.log("Force Next Piece not unlocked yet!");
+            return;
+        }
+        
+        if (nextPieceBoard3 === pieceType) {
+            console.log(`Board 3: Next piece is already '${pieceType}'!`);
+            return;
+        }
+        
+        if (points < FORCE_NEXT_PIECE_USE_COST) {
+            console.log("Not enough points to force next piece!");
+            return;
+        }
+        
+        points -= FORCE_NEXT_PIECE_USE_COST;
+        nextPieceBoard3 = pieceType;
+        
+        updatePointsDisplay();
+        updateNextPiecePreview(3);
+        
+        console.log(`Board 3: Next piece changed to '${pieceType}'!`);
+    }
+
+    /**
+     * Updates all board 2 specific buttons
+     */
+    function updateBoard2Buttons(): void {
+        updateForceNextPieceUI(2);
+        updateAIButtonBoard(2);
+        updateAIHardDropButtonBoard(2);
+        updateAISpeedButtonBoard(2);
+    }
+
+    /**
+     * Updates all board 3 specific buttons
+     */
+    function updateBoard3Buttons(): void {
+        updateForceNextPieceUI(3);
+        updateAIButtonBoard(3);
+        updateAIHardDropButtonBoard(3);
+        updateAISpeedButtonBoard(3);
+    }
+
+    /**
      * Updates the board status display (Player/AI control)
      */
     function updateBoardStatus(boardNumber: number): void {
@@ -3346,6 +4194,12 @@ function clearLinesBoard2(): number {
         if (!statusSection) return;
         
         if (boardNumber === 1 && aiEnabled) {
+            statusSection.style.backgroundColor = 'rgba(255, 152, 0, 0.2)';
+            statusSection.innerHTML = '<span>🤖 AI Control</span>';
+        } else if (boardNumber === 2 && aiEnabledBoard2) {
+            statusSection.style.backgroundColor = 'rgba(255, 152, 0, 0.2)';
+            statusSection.innerHTML = '<span>🤖 AI Control</span>';
+        } else if (boardNumber === 3 && aiEnabledBoard3) {
             statusSection.style.backgroundColor = 'rgba(255, 152, 0, 0.2)';
             statusSection.innerHTML = '<span>🤖 AI Control</span>';
         } else {
@@ -3509,6 +4363,278 @@ function createSecondBoard(): void {
     
     console.log("Board 2 created! Player now controls board 2, AI controls board 1.");
     }
+
+    /**
+     * Unlocks the third game board
+     */
+    function unlockThirdBoard(): void {
+        // Check requirements
+        if (!checkThirdBoardRequirements()) {
+            console.log("Requirements not met for third board!");
+            return;
+        }
+        
+        // Check if player has enough points
+        if (points < UNLOCK_THIRD_BOARD_COST) {
+            console.log("Not enough points for third board!");
+            return;
+        }
+        
+        // Deduct points
+        points -= UNLOCK_THIRD_BOARD_COST;
+        
+        // Set flag
+        thirdBoardUnlocked = true;
+        
+        // Create the third board
+        console.log("Third board unlocked! Creating board 3...");
+        
+        // Update displays
+        updatePointsDisplay();
+        
+        createThirdBoard();
+    }
+
+    /**
+     * Creates the third game board and reorganizes the layout
+     * Board 2 becomes small and goes below board 1
+     */
+    function createThirdBoard(): void {
+        const gameContainer = document.getElementById('game-container');
+        if (!gameContainer) return;
+        
+        // First, shrink board 2 and move it below board 1
+        shrinkBoard2();
+        
+        // Create board 3 container
+        const board3Container = document.createElement('div');
+        board3Container.id = 'board-3-container';
+        board3Container.style.display = 'flex';
+        board3Container.style.gap = '20px';
+        
+        // Create the canvas for board 3 (full size)
+        const canvas3 = document.createElement('canvas');
+        canvas3.id = 'game-canvas-3';
+        canvas3.width = BOARD_WIDTH + (PADDING * 2);
+        canvas3.height = BOARD_HEIGHT + (PADDING * 2);
+        
+        // Add canvas to container
+        board3Container.appendChild(canvas3);
+        
+        // Add to game container (after the small boards column)
+        gameContainer.appendChild(board3Container);
+        
+        // Create full UI for board 3 (with next piece preview and upgrades)
+        createMinimalBoardUI(3);
+        
+        // Initialize board 3's game state
+        initializeBoardState(3);
+        
+        // Spawn first piece for board 3
+        spawnNewPieceBoard3();
+        
+        // Update board 3 status to show player control
+        updateBoardStatus(3);
+        
+        // Player now controls board 3
+        activePlayerBoard = 3;
+        
+        // Make sure board 2's AI is active
+        if (!aiEnabledBoard2) {
+            aiEnabledBoard2 = true;
+            updateBoardStatus(2);
+        }
+        
+        // Hide board 2's upgrade buttons since it's now AI-controlled
+        simplifyBoard2UI();
+        
+        console.log("Board 3 created! Player now controls board 3, AI controls boards 1 and 2.");
+    }
+
+    /**
+     * Shrinks board 2 and repositions it below board 1
+     */
+    function shrinkBoard2(): void {
+        const gameContainer = document.getElementById('game-container');
+        const board1Container = document.getElementById('board-1-container');
+        const board2Container = document.getElementById('board-2-container');
+        
+        if (!gameContainer || !board1Container || !board2Container) return;
+        
+        // Create a column container for the small boards (board 1 and 2)
+        const smallBoardsColumn = document.createElement('div');
+        smallBoardsColumn.id = 'small-boards-column';
+        smallBoardsColumn.style.display = 'flex';
+        smallBoardsColumn.style.flexDirection = 'column';
+        smallBoardsColumn.style.gap = '20px';
+        
+        // Remove board 1 and 2 from game container
+        gameContainer.removeChild(board1Container);
+        gameContainer.removeChild(board2Container);
+        
+        // Shrink board 2's canvas
+        const canvas2 = document.getElementById('game-canvas-2') as HTMLCanvasElement;
+        if (canvas2) {
+            canvas2.width = BOARD_WIDTH_SMALL + (PADDING_SMALL * 2);
+            canvas2.height = BOARD_HEIGHT_SMALL + (PADDING_SMALL * 2);
+        }
+        
+        // Shrink board 2's UI panel
+        const board2UI = document.getElementById('board-2-ui');
+        if (board2UI) {
+            board2UI.style.width = '120px';
+            board2UI.style.padding = '10px';
+            board2UI.style.fontSize = '10px';
+        }
+        
+        // Add both boards to the column
+        smallBoardsColumn.appendChild(board1Container);
+        smallBoardsColumn.appendChild(board2Container);
+        
+        // Add the column to the game container
+        gameContainer.insertBefore(smallBoardsColumn, gameContainer.firstChild);
+    }
+
+    /**
+     * Simplifies Board 2's UI when the third board is unlocked
+     */
+    function simplifyBoard2UI(): void {
+        // Hide the next piece preview section for board 2
+        const nextPieceCanvas = document.getElementById('next-piece-canvas-2');
+        if (nextPieceCanvas && nextPieceCanvas.parentElement) {
+            nextPieceCanvas.parentElement.style.display = 'none';
+        }
+        
+        // Hide the upgrades section for board 2
+        const upgradesSection = document.getElementById('board-2-upgrades');
+        if (upgradesSection) {
+            upgradesSection.style.display = 'none';
+        }
+        
+        // Hide the force next piece container if it exists
+        const forceNextPieceContainer = document.getElementById('force-next-piece-container-2');
+        if (forceNextPieceContainer) {
+            forceNextPieceContainer.style.display = 'none';
+        }
+        
+        console.log("Board 2 UI simplified - hiding next piece preview and upgrade buttons");
+    }
+
+    /**
+     * Shows an overlay when Board 2 loses (but board 3 is still active)
+     */
+    function showBoard2LostOverlay(): void {
+        const overlay = document.createElement('div');
+        overlay.id = 'board-2-lost-overlay';
+        
+        overlay.style.position = 'absolute';
+        overlay.style.top = '0';
+        overlay.style.left = '0';
+        overlay.style.width = '100%';
+        overlay.style.height = '100%';
+        overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
+        overlay.style.display = 'flex';
+        overlay.style.flexDirection = 'column';
+        overlay.style.justifyContent = 'center';
+        overlay.style.alignItems = 'center';
+        overlay.style.zIndex = '100';
+        overlay.style.borderRadius = '12px';
+        
+        const title = document.createElement('h2');
+        title.textContent = 'BOARD 2 LOST';
+        title.style.color = '#ff4444';
+        title.style.fontSize = '16px';
+        title.style.margin = '0 0 10px 0';
+        title.style.fontFamily = 'Arial, sans-serif';
+        
+        const infoText = document.createElement('p');
+        infoText.style.color = '#aaa';
+        infoText.style.fontSize = '10px';
+        infoText.style.margin = '0 0 10px 0';
+        infoText.style.textAlign = 'center';
+        infoText.innerHTML = 'Pay to restart';
+        
+        const resetButton = document.createElement('button');
+        resetButton.id = 'reset-board-2-button';
+        resetButton.textContent = `Reset (${RESET_BOARD_2_COST} pts)`;
+        resetButton.style.padding = '8px 16px';
+        resetButton.style.fontSize = '12px';
+        resetButton.style.fontWeight = 'bold';
+        resetButton.style.backgroundColor = points >= RESET_BOARD_2_COST ? '#4CAF50' : '#888888';
+        resetButton.style.color = 'white';
+        resetButton.style.border = 'none';
+        resetButton.style.borderRadius = '6px';
+        resetButton.style.cursor = points >= RESET_BOARD_2_COST ? 'pointer' : 'not-allowed';
+        resetButton.disabled = points < RESET_BOARD_2_COST;
+        
+        resetButton.addEventListener('click', () => {
+            if (points >= RESET_BOARD_2_COST) {
+                resetBoard2WithUpgrades();
+            }
+        });
+        
+        overlay.appendChild(title);
+        overlay.appendChild(infoText);
+        overlay.appendChild(resetButton);
+        
+        const board2Container = document.getElementById('board-2-container');
+        if (board2Container) {
+            board2Container.style.position = 'relative';
+            board2Container.appendChild(overlay);
+        }
+    }
+
+    /**
+     * Updates the Board 2 Lost overlay button state
+     */
+    function updateBoard2LostOverlay(): void {
+        const resetButton = document.getElementById('reset-board-2-button') as HTMLButtonElement;
+        if (!resetButton) return;
+        
+        const canAfford = points >= RESET_BOARD_2_COST;
+        resetButton.disabled = !canAfford;
+        resetButton.style.backgroundColor = canAfford ? '#4CAF50' : '#888888';
+        resetButton.style.cursor = canAfford ? 'pointer' : 'not-allowed';
+    }
+
+    /**
+     * Resets Board 2 with full AI upgrades
+     */
+    function resetBoard2WithUpgrades(): void {
+        points -= RESET_BOARD_2_COST;
+        
+        const overlay = document.getElementById('board-2-lost-overlay');
+        if (overlay) {
+            overlay.remove();
+        }
+        
+        isGameOverBoard2 = false;
+        currentPieceBoard2 = null;
+        nextPieceBoard2 = null;
+        totalLinesClearedBoard2 = 0;
+        
+        initializeBoardState(2);
+        
+        aiPlayerHiredBoard2 = true;
+        aiEnabledBoard2 = true;
+        aiHardDropUnlockedBoard2 = true;
+        aiSpeedLevelBoard2 = MAX_AI_SPEED_UPGRADES;
+        aiSpeedBoard2 = BASE_AI_SPEED / Math.pow(1.5, MAX_AI_SPEED_UPGRADES);
+        
+        aiTargetPositionBoard2 = null;
+        aiMovingBoard2 = false;
+        aiLastMoveTimeBoard2 = 0;
+        
+        lastDropTimeBoard2 = performance.now();
+        
+        spawnNewPieceBoard2();
+        
+        updatePointsDisplay();
+        updateBoardStatus(2);
+        
+        console.log("Board 2 reset with full AI upgrades!");
+    }
+
     // AI PLAYER FUNCTIONS
 
     /**
@@ -3832,6 +4958,396 @@ function createSecondBoard(): void {
         aiMoving = false;
     }
 
+    // =====================================================
+    // BOARD 2 AI FUNCTIONS
+    // =====================================================
+
+    /**
+     * Simulates placing a piece on board 2 to evaluate the result
+     */
+    function simulateMoveBoard2(piece: ActivePiece, targetX: number, rotation: number): (string | null)[][] | null {
+        // Create a deep copy of board 2's state
+        const testBoard = boardStateBoard2.map(row => [...row]);
+        
+        // Apply rotations to get the desired shape
+        let testShape = piece.shape;
+        for (let r = 0; r < rotation; r++) {
+            testShape = rotateShape(testShape);
+        }
+        
+        // Create a test piece at the target position
+        const testPiece: ActivePiece = {
+            type: piece.type,
+            shape: testShape,
+            x: targetX,
+            y: 0,
+            color: piece.color
+        };
+        
+        // Check if initial position is valid
+        if (checkCollisionForTest(testPiece, testBoard)) {
+            return null;  // Can't place piece here
+        }
+        
+        // Drop the piece down until it hits something
+        while (!checkCollisionForTest(testPiece, testBoard)) {
+            testPiece.y++;
+        }
+        testPiece.y--;  // Back up one step
+        
+        // Lock the piece into the test board
+        for (let row = 0; row < testPiece.shape.length; row++) {
+            for (let col = 0; col < testPiece.shape[row].length; col++) {
+                if (testPiece.shape[row][col]) {
+                    const boardY = testPiece.y + row;
+                    const boardX = testPiece.x + col;
+                    if (boardY >= 0 && boardY < GRID_HEIGHT && boardX >= 0 && boardX < GRID_WIDTH) {
+                        testBoard[boardY][boardX] = testPiece.color;
+                    }
+                }
+            }
+        }
+        
+        return testBoard;
+    }
+
+    /**
+     * Calculates the best move for board 2's AI
+     */
+    function calculateBestMoveBoard2(): { x: number, rotation: number } | null {
+        if (!currentPieceBoard2) return null;
+        
+        let bestScore = -Infinity;
+        let bestMove = null;
+        
+        // Try all possible rotations (0-3)
+        const maxRotations = currentPieceBoard2.type === 'O' ? 1 : 4;
+        
+        for (let rotation = 0; rotation < maxRotations; rotation++) {
+            // Get the shape after rotation
+            let testShape = currentPieceBoard2.shape;
+            for (let r = 0; r < rotation; r++) {
+                testShape = rotateShape(testShape);
+            }
+            
+            // Find the actual bounds of the piece
+            let minCol = testShape[0].length;
+            let maxCol = -1;
+            for (let row = 0; row < testShape.length; row++) {
+                for (let col = 0; col < testShape[row].length; col++) {
+                    if (testShape[row][col]) {
+                        minCol = Math.min(minCol, col);
+                        maxCol = Math.max(maxCol, col);
+                    }
+                }
+            }
+            const actualWidth = maxCol - minCol + 1;
+            const leftOffset = minCol;
+            
+            // Try all possible x positions
+            for (let x = -leftOffset; x <= GRID_WIDTH - actualWidth - leftOffset; x++) {
+                // Simulate this move on board 2
+                const resultBoard = simulateMoveBoard2(currentPieceBoard2, x, rotation);
+                
+                if (resultBoard) {
+                    // Evaluate how good this position is
+                    const score = evaluateBoardState(resultBoard);
+                    
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestMove = { x, rotation };
+                    }
+                }
+            }
+        }
+        
+        // If no valid move was found, just drop at current position
+        if (!bestMove) {
+            console.log("Board 2 AI: No valid moves found, dropping at current position");
+            bestMove = { x: currentPieceBoard2.x, rotation: 0 };
+        }
+        
+        return bestMove;
+    }
+
+    /**
+     * Executes board 2 AI's planned move step by step
+     */
+    function executeAIMoveBoard2(): void {
+        if (!currentPieceBoard2 || !aiTargetPositionBoard2 || !aiEnabledBoard2) return;
+        
+        // Track rotations to avoid infinite loops
+        if (!currentPieceBoard2.hasOwnProperty('aiRotations')) {
+            (currentPieceBoard2 as any).aiRotations = 0;
+        }
+        
+        const currentRotations = (currentPieceBoard2 as any).aiRotations;
+        const targetRotation = aiTargetPositionBoard2.rotation;
+        
+        // Step 1: Rotate to target rotation (if needed)
+        if (currentRotations < targetRotation) {
+            if (rotatePieceBoard2()) {
+                (currentPieceBoard2 as any).aiRotations++;
+            } else {
+                // Can't rotate, skip to movement
+                (currentPieceBoard2 as any).aiRotations = targetRotation;
+            }
+            return;
+        }
+        
+        // Step 2: Move horizontally to target position
+        const currentX = currentPieceBoard2.x;
+        const targetX = aiTargetPositionBoard2.x;
+        
+        if (currentX !== targetX) {
+            const direction = targetX > currentX ? 1 : -1;
+            
+            if (!movePieceHorizontallyBoard2(direction)) {
+                // Can't move horizontally, just drop
+                console.log("Board 2 AI: Can't reach target position, dropping here");
+                movePieceDownBoard2();
+                aiTargetPositionBoard2 = null;
+                aiMovingBoard2 = false;
+            }
+            return;
+        }
+        
+        // Step 3: We're in position! Drop the piece
+        if (aiHardDropUnlockedBoard2) {
+            hardDropBoard2();
+        } else {
+            movePieceDownBoard2();
+        }
+        
+        // Clear the target
+        aiTargetPositionBoard2 = null;
+        aiMovingBoard2 = false;
+    }
+
+    /**
+     * Main AI control function for board 2
+     * Called every frame to manage board 2's AI behavior
+     */
+    function updateAIBoard2(currentTime: number): void {
+        // Check if AI should be active
+        if (!aiEnabledBoard2 || !currentPieceBoard2) return;
+        
+        // Safety check: if a piece has been active for too long, just drop it
+        if (!currentPieceBoard2.hasOwnProperty('aiStartTime')) {
+            (currentPieceBoard2 as any).aiStartTime = currentTime;
+        }
+        
+        const pieceAge = currentTime - (currentPieceBoard2 as any).aiStartTime;
+        if (pieceAge > 5000) {  // 5 seconds timeout
+            console.log("Board 2 AI: Piece timeout, forcing drop");
+            movePieceDownBoard2();
+            aiTargetPositionBoard2 = null;
+            aiMovingBoard2 = false;
+            return;
+        }
+        
+        // If AI doesn't have a target, calculate one
+        if (!aiTargetPositionBoard2 && !aiMovingBoard2) {
+            aiTargetPositionBoard2 = calculateBestMoveBoard2();
+            aiMovingBoard2 = true;
+            
+            // If no valid move found, just drop the piece
+            if (!aiTargetPositionBoard2) {
+                movePieceDownBoard2();
+                aiMovingBoard2 = false;
+                return;
+            }
+        }
+        
+        // Execute moves at AI speed
+        if (currentTime - aiLastMoveTimeBoard2 > aiSpeedBoard2) {
+            executeAIMoveBoard2();
+            aiLastMoveTimeBoard2 = currentTime;
+        }
+    }
+
+    // =====================================================
+    // BOARD 3 AI FUNCTIONS
+    // =====================================================
+
+    /**
+     * Simulates placing a piece on board 3
+     */
+    function simulateMoveBoard3(piece: ActivePiece, targetX: number, rotation: number): (string | null)[][] | null {
+        const testBoard = boardStateBoard3.map(row => [...row]);
+        
+        let testShape = piece.shape;
+        for (let r = 0; r < rotation; r++) {
+            testShape = rotateShape(testShape);
+        }
+        
+        const testPiece: ActivePiece = {
+            type: piece.type,
+            shape: testShape,
+            x: targetX,
+            y: 0,
+            color: piece.color
+        };
+        
+        if (checkCollisionForTest(testPiece, testBoard)) {
+            return null;
+        }
+        
+        while (!checkCollisionForTest(testPiece, testBoard)) {
+            testPiece.y++;
+        }
+        testPiece.y--;
+        
+        for (let row = 0; row < testPiece.shape.length; row++) {
+            for (let col = 0; col < testPiece.shape[row].length; col++) {
+                if (testPiece.shape[row][col]) {
+                    const boardY = testPiece.y + row;
+                    const boardX = testPiece.x + col;
+                    if (boardY >= 0 && boardY < GRID_HEIGHT && boardX >= 0 && boardX < GRID_WIDTH) {
+                        testBoard[boardY][boardX] = testPiece.color;
+                    }
+                }
+            }
+        }
+        
+        return testBoard;
+    }
+
+    /**
+     * Calculates the best move for board 3's AI
+     */
+    function calculateBestMoveBoard3(): { x: number, rotation: number } | null {
+        if (!currentPieceBoard3) return null;
+        
+        let bestScore = -Infinity;
+        let bestMove = null;
+        
+        const maxRotations = currentPieceBoard3.type === 'O' ? 1 : 4;
+        
+        for (let rotation = 0; rotation < maxRotations; rotation++) {
+            let testShape = currentPieceBoard3.shape;
+            for (let r = 0; r < rotation; r++) {
+                testShape = rotateShape(testShape);
+            }
+            
+            let minCol = testShape[0].length;
+            let maxCol = -1;
+            for (let row = 0; row < testShape.length; row++) {
+                for (let col = 0; col < testShape[row].length; col++) {
+                    if (testShape[row][col]) {
+                        minCol = Math.min(minCol, col);
+                        maxCol = Math.max(maxCol, col);
+                    }
+                }
+            }
+            const actualWidth = maxCol - minCol + 1;
+            const leftOffset = minCol;
+            
+            for (let x = -leftOffset; x <= GRID_WIDTH - actualWidth - leftOffset; x++) {
+                const resultBoard = simulateMoveBoard3(currentPieceBoard3, x, rotation);
+                
+                if (resultBoard) {
+                    const score = evaluateBoardState(resultBoard);
+                    
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestMove = { x, rotation };
+                    }
+                }
+            }
+        }
+        
+        if (!bestMove) {
+            console.log("Board 3 AI: No valid moves found, dropping at current position");
+            bestMove = { x: currentPieceBoard3.x, rotation: 0 };
+        }
+        
+        return bestMove;
+    }
+
+    /**
+     * Executes board 3 AI's planned move
+     */
+    function executeAIMoveBoard3(): void {
+        if (!currentPieceBoard3 || !aiTargetPositionBoard3 || !aiEnabledBoard3) return;
+        
+        if (!currentPieceBoard3.hasOwnProperty('aiRotations')) {
+            (currentPieceBoard3 as any).aiRotations = 0;
+        }
+        
+        const currentRotations = (currentPieceBoard3 as any).aiRotations;
+        const targetRotation = aiTargetPositionBoard3.rotation;
+        
+        if (currentRotations < targetRotation) {
+            if (rotatePieceBoard3()) {
+                (currentPieceBoard3 as any).aiRotations++;
+            } else {
+                (currentPieceBoard3 as any).aiRotations = targetRotation;
+            }
+            return;
+        }
+        
+        const currentX = currentPieceBoard3.x;
+        const targetX = aiTargetPositionBoard3.x;
+        
+        if (currentX !== targetX) {
+            const direction = targetX > currentX ? 1 : -1;
+            
+            if (!movePieceHorizontallyBoard3(direction)) {
+                console.log("Board 3 AI: Can't reach target position, dropping here");
+                movePieceDownBoard3();
+                aiTargetPositionBoard3 = null;
+                aiMovingBoard3 = false;
+            }
+            return;
+        }
+        
+        if (aiHardDropUnlockedBoard3) {
+            hardDropBoard3();
+        } else {
+            movePieceDownBoard3();
+        }
+        
+        aiTargetPositionBoard3 = null;
+        aiMovingBoard3 = false;
+    }
+
+    /**
+     * Main AI control function for board 3
+     */
+    function updateAIBoard3(currentTime: number): void {
+        if (!aiEnabledBoard3 || !currentPieceBoard3) return;
+        
+        if (!currentPieceBoard3.hasOwnProperty('aiStartTime')) {
+            (currentPieceBoard3 as any).aiStartTime = currentTime;
+        }
+        
+        const pieceAge = currentTime - (currentPieceBoard3 as any).aiStartTime;
+        if (pieceAge > 5000) {
+            console.log("Board 3 AI: Piece timeout, forcing drop");
+            movePieceDownBoard3();
+            aiTargetPositionBoard3 = null;
+            aiMovingBoard3 = false;
+            return;
+        }
+        
+        if (!aiTargetPositionBoard3 && !aiMovingBoard3) {
+            aiTargetPositionBoard3 = calculateBestMoveBoard3();
+            aiMovingBoard3 = true;
+            
+            if (!aiTargetPositionBoard3) {
+                movePieceDownBoard3();
+                aiMovingBoard3 = false;
+                return;
+            }
+        }
+        
+        if (currentTime - aiLastMoveTimeBoard3 > aiSpeedBoard3) {
+            executeAIMoveBoard3();
+            aiLastMoveTimeBoard3 = currentTime;
+        }
+    }
+
     /**
      * Main AI control function
      * Called every frame to manage AI behavior
@@ -3917,18 +5433,32 @@ function createSecondBoard(): void {
     // Don't process input if game is paused
     if (isPaused) return;
     // Determine which board to control based on activePlayerBoard
-    const boardToControl = secondBoardUnlocked ? activePlayerBoard : 1;
+    let boardToControl = 1;
+    if (thirdBoardUnlocked) {
+        boardToControl = activePlayerBoard;
+    } else if (secondBoardUnlocked) {
+        boardToControl = activePlayerBoard;
+    }
     
     // Don't allow input if the controlled board is game over
     if (boardToControl === 1 && isGameOver) return;
     if (boardToControl === 2 && isGameOverBoard2) return;
+    if (boardToControl === 3 && isGameOverBoard3) return;
     
     // Don't allow control if AI is controlling this board
     if (boardToControl === 1 && aiEnabled) return;
     if (boardToControl === 2 && aiEnabledBoard2) return;
+    if (boardToControl === 3 && aiEnabledBoard3) return;
     
     // Get the current piece for the active board
-    const piece = boardToControl === 1 ? currentPiece : currentPieceBoard2;
+    let piece: ActivePiece | null = null;
+    if (boardToControl === 1) {
+        piece = currentPiece;
+    } else if (boardToControl === 2) {
+        piece = currentPieceBoard2;
+    } else {
+        piece = currentPieceBoard3;
+    }
     if (!piece) return;
     
     // Prevent default browser behaviors
@@ -3979,6 +5509,27 @@ function createSecondBoard(): void {
                 }
                 break;
         }
+    } else if (boardToControl === 3) {
+        switch(event.key) {
+            case 'ArrowLeft':
+                movePieceHorizontallyBoard3(-1);
+                break;
+            case 'ArrowRight':
+                movePieceHorizontallyBoard3(1);
+                break;
+            case 'ArrowDown':
+                movePieceDownBoard3();
+                lastDropTimeBoard3 = performance.now();
+                break;
+            case 'ArrowUp':
+                rotatePieceBoard3();
+                break;
+            case ' ':
+                if (hardDropUnlocked) {
+                    hardDropBoard3();
+                }
+                break;
+        }
     }
 });
 
@@ -4012,13 +5563,27 @@ function createSecondBoard(): void {
         // BOARD 2 LOGIC (if it exists)
         if (secondBoardUnlocked && !isGameOverBoard2) {
             if (aiEnabledBoard2) {
-                // Board 2 AI logic would go here (not implemented yet)
+                updateAIBoard2(currentTime);
             } else {
                 // Player controls board 2
                 const timeSinceDropBoard2 = currentTime - lastDropTimeBoard2;
                 if (timeSinceDropBoard2 > DROP_SPEED) {
                     movePieceDownBoard2();
                     lastDropTimeBoard2 = currentTime;
+                }
+            }
+        }
+        
+        // BOARD 3 LOGIC (if it exists)
+        if (thirdBoardUnlocked && !isGameOverBoard3) {
+            if (aiEnabledBoard3) {
+                updateAIBoard3(currentTime);
+            } else {
+                // Player controls board 3
+                const timeSinceDropBoard3 = currentTime - lastDropTimeBoard3;
+                if (timeSinceDropBoard3 > DROP_SPEED) {
+                    movePieceDownBoard3();
+                    lastDropTimeBoard3 = currentTime;
                 }
             }
         }
@@ -4038,6 +5603,15 @@ function createSecondBoard(): void {
         drawBoardStateBoard2();
         if (!isGameOverBoard2) {
             drawCurrentPieceBoard2();
+        }
+    }
+    
+    // DRAWING BOARD 3 (if it exists)
+    if (thirdBoardUnlocked) {
+        drawBoard3();
+        drawBoardStateBoard3();
+        if (!isGameOverBoard3) {
+            drawCurrentPieceBoard3();
         }
     }
     
