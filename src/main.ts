@@ -3143,7 +3143,7 @@ if (tutorialsEnabled) {
     showDialogue('welcome', null);
 }
 
-// DEBUG: Remove this after testing prestige
+/* DEBUG: Remove this after testing prestige
 const debugButton = document.createElement('button');
 debugButton.textContent = '🐛 DEBUG: Add 10k Score';
 debugButton.style.position = 'fixed';
@@ -3162,7 +3162,7 @@ debugButton.addEventListener('click', () => {
     updatePointsDisplay();
     console.log('DEBUG: Score set to 10000, Points set to 1000');
 });
-document.body.appendChild(debugButton);
+document.body.appendChild(debugButton);*/
 
 // Start the game
 board0.lastDropTime = performance.now();
