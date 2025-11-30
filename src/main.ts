@@ -302,9 +302,9 @@ function canUnlockNextBoard(): boolean {
     return isBoardMaxedOut(lastBoard);
 }
 
-function getActiveBoard(): Board | null {
+/*function getActiveBoard(): Board | null {
     return boards[activeBoardIndex] || null;
-}
+}*/
 
 // =====================================================
 // PIECE FUNCTIONS
