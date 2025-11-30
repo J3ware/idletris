@@ -32,6 +32,9 @@ const MAX_AI_SPEED_UPGRADES = 5;  // Maximum speed upgrade levels
 // Maximum number of boards (6 mini + 1 active = 7 total)
 const MAX_BOARDS = 7;
 
+// Take Control feature constants
+const TAKE_CONTROL_PIECES = 30;   // Number of pieces player controls when using Take Control
+
 // =====================================================
 // COST CONFIGURATION
 // =====================================================
@@ -45,6 +48,7 @@ const BASE_COSTS = {
     RESET_BOARD: 10,               // Cost to reset board 1 after loss
     FORCE_NEXT_PIECE_UNLOCK: 20,   // Unlock force next piece feature
     FORCE_NEXT_PIECE_USE: 5,       // Cost per use
+    TAKE_CONTROL: 30,              // Cost to pause AI and take control for 30 pieces
 };
 
 // Cost multiplier per board tier (1.5x each board)
@@ -56,17 +60,25 @@ const COST_MULTIPLIER = 1.5;
 
 // Calculate the cost of an upgrade for a specific board
 function getBoardCost(baseCost: number, boardIndex: number): number {
-    return Math.round(baseCost * Math.pow(COST_MULTIPLIER, boardIndex));
+    // Apply board tier scaling (1.5x per board)
+    const tieredCost = baseCost * Math.pow(COST_MULTIPLIER, boardIndex);
+    // Apply prestige cost reduction (5% per level)
+    const reduction = 1 - (costReductionLevel * COST_REDUCTION_PER_LEVEL);
+    return Math.round(tieredCost * reduction);
 }
 
 // Calculate the cost to reset a specific board after it loses
 function getResetCost(boardIndex: number): number {
-    return Math.round(BASE_COSTS.RESET_BOARD * Math.pow(COST_MULTIPLIER, boardIndex));
+    const tieredCost = BASE_COSTS.RESET_BOARD * Math.pow(COST_MULTIPLIER, boardIndex);
+    const reduction = 1 - (costReductionLevel * COST_REDUCTION_PER_LEVEL);
+    return Math.round(tieredCost * reduction);
 }
 
 // Calculate the cost to unlock the next board
 function getNextBoardUnlockCost(currentBoardCount: number): number {
-    return Math.round(BASE_COSTS.UNLOCK_NEXT_BOARD * Math.pow(COST_MULTIPLIER, currentBoardCount - 1));
+    const tieredCost = BASE_COSTS.UNLOCK_NEXT_BOARD * Math.pow(COST_MULTIPLIER, currentBoardCount - 1);
+    const reduction = 1 - (costReductionLevel * COST_REDUCTION_PER_LEVEL);
+    return Math.round(tieredCost * reduction);
 }
 
 // =====================================================
@@ -159,6 +171,12 @@ interface Board {
     // Status flags
     isMaxedOut: boolean;
     isMinified: boolean;
+
+    // Force Next Piece (per-board unlock)
+    forceNextPieceUnlocked: boolean;
+    
+    // Take Control feature (pay-per-use)
+    playerControlPiecesRemaining: number;  // Counts down from 30 to 0
 }
 
 // =====================================================
@@ -171,7 +189,6 @@ let globalLinesCleared: number = 0;
 
 // Global upgrades
 let hardDropUnlocked: boolean = false;
-let forceNextPieceUnlocked: boolean = false;
 
 // Game control state
 let isGameOver: boolean = false;
@@ -186,7 +203,24 @@ let shownDialogues: Set<string> = new Set();
 let displayedDialogues: Set<string> = new Set();
 let tutorialsEnabled: boolean = true;
 
+// =====================================================
+// PRESTIGE SYSTEM STATE
+// =====================================================
+let prestigeCount: number = 0;           // How many times player has prestiged
+let prestigeStars: number = 0;           // Spendable prestige currency
+let costReductionLevel: number = 0;      // 0-10, each level = 5% reduction
+let pointsMultiplierLevel: number = 0;   // 0-10, each level = 0.1x bonus
+
+const MAX_PRESTIGE_UPGRADE_LEVEL = 10;
+const COST_REDUCTION_PER_LEVEL = 0.05;   // 5% per level
+const POINTS_MULTIPLIER_PER_LEVEL = 0.1; // 0.1x per level
+const SCORE_PER_STAR = 5000;             // 5000 score (lines) = 1 star
+
 const DIALOGUE_CONTENT: { [key: string]: { title: string; description: string } } = {
+    'welcome': {
+        title: 'Welcome to IDLETRIS!',
+        description: 'Pieces fall from above - use arrow keys to move and rotate them. Clear lines to earn points! Spend points on upgrades to automate your boards. Game over happens when your active board fills up. Your goal: get the highest score possible!'
+    },
     'global-harddrop': {
         title: 'Unlock Hard Drop',
         description: 'Spend 1 point to unlock Hard Drop. Use SPACE BAR to instantly drop pieces. This is permanent!'
@@ -249,13 +283,16 @@ function createBoard(index: number): Board {
         container: null,
         isMaxedOut: false,
         isMinified: false,
+        forceNextPieceUnlocked: false,
+        playerControlPiecesRemaining: 0,
     };
 }
 
 function isBoardMaxedOut(board: Board): boolean {
     return board.aiHired && 
            board.aiHardDropUnlocked && 
-           board.aiSpeedLevel >= MAX_AI_SPEED_UPGRADES;
+           board.aiSpeedLevel >= MAX_AI_SPEED_UPGRADES &&
+           board.forceNextPieceUnlocked;  // Now required for max-out
 }
 
 function canUnlockNextBoard(): boolean {
@@ -453,6 +490,19 @@ function lockPiece(board: Board): void {
     
     board.currentPiece = null;
     clearLines(board);
+    
+    // Decrement Take Control counter if player is temporarily in control
+    if (board.playerControlPiecesRemaining > 0) {
+        board.playerControlPiecesRemaining--;
+        updateTakeControlDisplay(board.index);
+        
+        // If counter hits 0, re-enable AI
+        if (board.playerControlPiecesRemaining === 0) {
+            board.aiEnabled = true;
+            updateBoardStatus(board.index);
+            console.log(`Board ${board.index + 1}: AI resumed control`);
+        }
+    }
 }
 
 function clearLines(board: Board): number {
@@ -478,7 +528,10 @@ function clearLines(board: Board): number {
     
     if (linesCleared > 0) {
         globalLinesCleared += linesCleared;
-        globalPoints += linesCleared;
+        // Apply prestige points multiplier (1.0x base + 0.1x per level)
+        const multiplier = 1 + (pointsMultiplierLevel * POINTS_MULTIPLIER_PER_LEVEL);
+        const pointsEarned = Math.round(linesCleared * multiplier);
+        globalPoints += pointsEarned;
         updatePointsDisplay();
         flashEffect(board, linesCleared);
     }
@@ -501,6 +554,7 @@ function spawnNewPiece(board: Board): void {
     board.aiMoving = false;
     
     updateNextPiecePreview(board);
+    updateForceNextPieceUI(board.index);
 }
 
 function handleBoardGameOver(board: Board): void {
@@ -970,6 +1024,26 @@ function createGlobalHeader(): void {
     header.appendChild(titleSection);
     header.appendChild(pointsSection);
     header.appendChild(scoreSection);
+    
+    // Prestige stars section (only visible after first prestige)
+    const starsSection = document.createElement('div');
+    starsSection.id = 'stars-section';
+    starsSection.style.textAlign = 'center';
+    starsSection.style.padding = '15px 30px';
+    starsSection.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+    starsSection.style.borderRadius = '10px';
+    starsSection.style.cursor = 'pointer';
+    starsSection.style.display = 'none';  // Hidden until first prestige
+    starsSection.title = 'Click to open Prestige Shop';
+    starsSection.innerHTML = `
+        <div style="font-size: 14px; color: #888; margin-bottom: 5px;">Prestige</div>
+        <div style="font-size: 32px; font-weight: bold; color: #FFD700;">
+            ⭐ <span id="stars-value">0</span>
+        </div>
+    `;
+    starsSection.addEventListener('click', openPrestigeShop);
+    
+    header.appendChild(starsSection);
     header.appendChild(controlsSection);
     header.appendChild(globalUpgradesSection);
     
@@ -1047,6 +1121,68 @@ function createUnlockNextBoardButton(): void {
     unlockButton.addEventListener('click', unlockNextBoard);
     
     globalUpgradesSection.appendChild(unlockButton);
+    
+    // Prestige button (appears when board 7 is maxed and player has 5000+ points)
+    const prestigeButton = document.createElement('button');
+    prestigeButton.id = 'prestige-button';
+    prestigeButton.style.display = 'none';
+    prestigeButton.style.padding = '10px 20px';
+    prestigeButton.style.fontSize = '14px';
+    prestigeButton.style.fontWeight = 'bold';
+    prestigeButton.style.backgroundColor = '#FFD700';
+    prestigeButton.style.color = '#000';
+    prestigeButton.style.border = 'none';
+    prestigeButton.style.borderRadius = '8px';
+    prestigeButton.style.cursor = 'pointer';
+    prestigeButton.style.transition = 'all 0.3s ease';
+    
+    prestigeButton.addEventListener('mouseenter', () => {
+        prestigeButton.style.backgroundColor = '#FFC000';
+        prestigeButton.style.transform = 'scale(1.05)';
+    });
+    
+    prestigeButton.addEventListener('mouseleave', () => {
+        prestigeButton.style.backgroundColor = '#FFD700';
+        prestigeButton.style.transform = 'scale(1)';
+    });
+    
+    prestigeButton.addEventListener('click', performPrestige);
+    
+    globalUpgradesSection.appendChild(prestigeButton);
+}
+
+function createPieceIcon(pieceType: PieceType, boardIndex: number): HTMLImageElement {
+    const icon = document.createElement('img');
+    icon.id = `force-piece-${pieceType}-${boardIndex}`;
+    icon.src = `/pieces/${pieceType}.${pieceType === 'O' ? 'jpg' : 'png'}`;
+    icon.alt = pieceType;
+    icon.style.width = '24px';
+    icon.style.height = '24px';
+    icon.style.cursor = 'pointer';
+    icon.style.borderRadius = '4px';
+    icon.style.border = '2px solid transparent';
+    icon.style.opacity = '0.5';
+    icon.style.transition = 'all 0.2s ease';
+    
+    icon.addEventListener('mouseenter', () => {
+        if (!icon.classList.contains('disabled') && !icon.classList.contains('selected')) {
+            icon.style.transform = 'scale(1.15)';
+            icon.style.opacity = '1';
+        }
+    });
+    
+    icon.addEventListener('mouseleave', () => {
+        if (!icon.classList.contains('disabled') && !icon.classList.contains('selected')) {
+            icon.style.transform = 'scale(1)';
+            icon.style.opacity = '0.7';
+        }
+    });
+    
+    icon.addEventListener('click', () => {
+        forceNextPiece(boardIndex, pieceType);
+    });
+    
+    return icon;
 }
 
 function createUI(): void {
@@ -1152,6 +1288,52 @@ function createBoardUI(boardIndex: number): void {
     nextPieceCanvas.style.borderRadius = '4px';
     nextPieceCanvas.style.backgroundColor = '#111';
     nextPieceSection.appendChild(nextPieceCanvas);
+
+    // Force Next Piece section (shows piece icons to select next piece)
+    const forceNextPieceContainer = document.createElement('div');
+    forceNextPieceContainer.id = `force-next-piece-container-${boardIndex}`;
+    forceNextPieceContainer.style.marginTop = '10px';
+    forceNextPieceContainer.style.display = 'none';  // Hidden until unlocked or affordable
+    
+    // Piece icons container - two rows, second row centered
+    const pieceIconsRow = document.createElement('div');
+    pieceIconsRow.id = `piece-icons-row-${boardIndex}`;
+    pieceIconsRow.style.display = 'flex';
+    pieceIconsRow.style.flexDirection = 'column';
+    pieceIconsRow.style.alignItems = 'center';
+    pieceIconsRow.style.gap = '4px';
+    
+    // First row: I, O, S, Z
+    const row1 = document.createElement('div');
+    row1.style.display = 'flex';
+    row1.style.gap = '4px';
+    
+    // Second row: T, J, L (centered)
+    const row2 = document.createElement('div');
+    row2.style.display = 'flex';
+    row2.style.gap = '4px';
+    
+    // Define which pieces go in which row
+    const row1Pieces: PieceType[] = ['I', 'O', 'S', 'Z'];
+    const row2Pieces: PieceType[] = ['T', 'J', 'L'];
+    
+    // Create icons for row 1
+    row1Pieces.forEach(pieceType => {
+        const icon = createPieceIcon(pieceType, boardIndex);
+        row1.appendChild(icon);
+    });
+    
+    // Create icons for row 2
+    row2Pieces.forEach(pieceType => {
+        const icon = createPieceIcon(pieceType, boardIndex);
+        row2.appendChild(icon);
+    });
+    
+    pieceIconsRow.appendChild(row1);
+    pieceIconsRow.appendChild(row2);
+    
+    forceNextPieceContainer.appendChild(pieceIconsRow);
+    nextPieceSection.appendChild(forceNextPieceContainer);
     
     // Board status
     const statusSection = document.createElement('div');
@@ -1249,6 +1431,58 @@ function createBoardUpgradeButtons(boardIndex: number): void {
     upgradesSection.appendChild(aiButton);
     upgradesSection.appendChild(aiHardDropButton);
     upgradesSection.appendChild(aiSpeedButton);
+    
+    // Force Next Piece unlock button (required for max-out, no AI required)
+    const forceNextPieceCost = getBoardCost(BASE_COSTS.FORCE_NEXT_PIECE_UNLOCK, boardIndex);
+    const forceNextPieceButton = document.createElement('button');
+    forceNextPieceButton.id = `force-next-piece-button-${boardIndex}`;
+    forceNextPieceButton.textContent = `Force Piece (${forceNextPieceCost} pts)`;
+    forceNextPieceButton.style.display = 'none';
+    forceNextPieceButton.style.width = '100%';
+    forceNextPieceButton.style.padding = '10px';
+    forceNextPieceButton.style.fontSize = '13px';
+    forceNextPieceButton.style.fontWeight = 'bold';
+    forceNextPieceButton.style.backgroundColor = '#9C27B0';
+    forceNextPieceButton.style.color = 'white';
+    forceNextPieceButton.style.border = 'none';
+    forceNextPieceButton.style.borderRadius = '6px';
+    forceNextPieceButton.style.cursor = 'pointer';
+    forceNextPieceButton.style.transition = 'all 0.3s ease';
+    
+    forceNextPieceButton.addEventListener('click', () => purchaseForceNextPiece(boardIndex));
+    upgradesSection.appendChild(forceNextPieceButton);
+    
+    // Take Control button (pay-per-use, shows when AI is controlling active board)
+    const takeControlCost = getBoardCost(BASE_COSTS.TAKE_CONTROL, boardIndex);
+    const takeControlButton = document.createElement('button');
+    takeControlButton.id = `take-control-button-${boardIndex}`;
+    takeControlButton.textContent = `Take Control (${takeControlCost} pts)`;
+    takeControlButton.style.display = 'none';
+    takeControlButton.style.width = '100%';
+    takeControlButton.style.padding = '10px';
+    takeControlButton.style.fontSize = '13px';
+    takeControlButton.style.fontWeight = 'bold';
+    takeControlButton.style.backgroundColor = '#E91E63';
+    takeControlButton.style.color = 'white';
+    takeControlButton.style.border = 'none';
+    takeControlButton.style.borderRadius = '6px';
+    takeControlButton.style.cursor = 'pointer';
+    takeControlButton.style.transition = 'all 0.3s ease';
+    
+    takeControlButton.addEventListener('click', () => activateTakeControl(boardIndex));
+    upgradesSection.appendChild(takeControlButton);
+    
+    // Take Control counter display (shows pieces remaining when player has control)
+    const takeControlCounter = document.createElement('div');
+    takeControlCounter.id = `take-control-counter-${boardIndex}`;
+    takeControlCounter.style.display = 'none';
+    takeControlCounter.style.padding = '8px';
+    takeControlCounter.style.backgroundColor = 'rgba(233, 30, 99, 0.2)';
+    takeControlCounter.style.borderRadius = '6px';
+    takeControlCounter.style.textAlign = 'center';
+    takeControlCounter.style.fontSize = '12px';
+    takeControlCounter.innerHTML = `<span>🎮 Pieces left: <strong id="take-control-count-${boardIndex}">0</strong></span>`;
+    upgradesSection.appendChild(takeControlCounter);
 }
 
 // =====================================================
@@ -1322,6 +1556,164 @@ function purchaseAISpeedUpgrade(boardIndex: number): void {
     console.log(`AI Speed upgraded to level ${board.aiSpeedLevel} for board ${boardIndex + 1}!`);
 }
 
+function purchaseForceNextPiece(boardIndex: number): void {
+    const board = boards[boardIndex];
+    if (!board || board.forceNextPieceUnlocked) return;
+    
+    const cost = getBoardCost(BASE_COSTS.FORCE_NEXT_PIECE_UNLOCK, boardIndex);
+    if (globalPoints < cost) return;
+    
+    globalPoints -= cost;
+    board.forceNextPieceUnlocked = true;
+    
+    updatePointsDisplay();
+    updateBoardButtons(boardIndex);
+    updateForceNextPieceUI(boardIndex);
+    checkBoardMaxedOut(boardIndex);
+    
+    console.log(`Force Next Piece unlocked for board ${boardIndex + 1}!`);
+}
+
+function forceNextPiece(boardIndex: number, pieceType: PieceType): void {
+    const board = boards[boardIndex];
+    if (!board || !board.forceNextPieceUnlocked) return;
+    
+    // Can't change to the same piece
+    if (board.nextPiece === pieceType) return;
+    
+    const cost = getBoardCost(BASE_COSTS.FORCE_NEXT_PIECE_USE, boardIndex);
+    if (globalPoints < cost) return;
+    
+    globalPoints -= cost;
+    board.nextPiece = pieceType;
+    
+    updatePointsDisplay();
+    updateNextPiecePreview(board);
+    updateForceNextPieceUI(boardIndex);
+    
+    console.log(`Board ${boardIndex + 1}: Next piece forced to ${pieceType}`);
+}
+
+function activateTakeControl(boardIndex: number): void {
+    const board = boards[boardIndex];
+    // Only works on active board when AI is in control
+    if (!board || board.index !== activeBoardIndex || !board.aiEnabled) return;
+    
+    const cost = getBoardCost(BASE_COSTS.TAKE_CONTROL, boardIndex);
+    if (globalPoints < cost) return;
+    
+    globalPoints -= cost;
+    
+    // Pause AI and give player control for 30 pieces
+    board.aiEnabled = false;
+    board.playerControlPiecesRemaining = TAKE_CONTROL_PIECES;
+    board.aiTargetPosition = null;
+    board.aiMoving = false;
+    
+    updatePointsDisplay();
+    updateBoardStatus(boardIndex);
+    updateTakeControlDisplay(boardIndex);
+    
+    console.log(`Board ${boardIndex + 1}: Player taking control for ${TAKE_CONTROL_PIECES} pieces`);
+}
+
+function updateTakeControlDisplay(boardIndex: number): void {
+    const board = boards[boardIndex];
+    if (!board) return;
+    
+    const counter = document.getElementById(`take-control-counter-${boardIndex}`);
+    const countValue = document.getElementById(`take-control-count-${boardIndex}`);
+    const button = document.getElementById(`take-control-button-${boardIndex}`) as HTMLButtonElement;
+    
+    // Only show Take Control UI on the active board
+    if (board.index !== activeBoardIndex) {
+        if (counter) counter.style.display = 'none';
+        if (button) button.style.display = 'none';
+        return;
+    }
+    
+    if (board.playerControlPiecesRemaining > 0) {
+        // Player is in control - show counter, hide button
+        if (counter) counter.style.display = 'block';
+        if (countValue) countValue.textContent = board.playerControlPiecesRemaining.toString();
+        if (button) button.style.display = 'none';
+        
+    } else if (board.aiEnabled && !board.isGameOver) {
+        // AI is controlling the active board - show Take Control button if affordable
+        if (counter) counter.style.display = 'none';
+        const cost = getBoardCost(BASE_COSTS.TAKE_CONTROL, boardIndex);
+        if (button) {
+            if (globalPoints >= cost) {
+                button.style.display = 'block';
+                button.style.backgroundColor = '#E91E63';
+                button.style.cursor = 'pointer';
+                button.disabled = false;
+                button.textContent = `Take Control (${cost} pts)`;
+            } else {
+                button.style.display = 'none';
+            }
+        }
+    } else {
+        // Player is already in control or game over - hide both
+        if (counter) counter.style.display = 'none';
+        if (button) button.style.display = 'none';
+    }
+}
+
+function updateForceNextPieceUI(boardIndex: number): void {
+    const board = boards[boardIndex];
+    if (!board) return;
+    
+    const container = document.getElementById(`force-next-piece-container-${boardIndex}`);
+    if (!container) return;
+    
+    // Only show on active board
+    if (board.index !== activeBoardIndex) {
+        container.style.display = 'none';
+        return;
+    }
+    
+    if (board.forceNextPieceUnlocked) {
+        container.style.display = 'block';
+        
+        // Update each piece icon
+        const pieceTypes: PieceType[] = ['I', 'O', 'T', 'S', 'Z', 'J', 'L'];
+        const useCost = getBoardCost(BASE_COSTS.FORCE_NEXT_PIECE_USE, boardIndex);
+        
+        pieceTypes.forEach(pieceType => {
+            const icon = document.getElementById(`force-piece-${pieceType}-${boardIndex}`) as HTMLImageElement;
+            if (!icon) return;
+            
+            const isCurrentNext = board.nextPiece === pieceType;
+            const canAfford = globalPoints >= useCost;
+            
+            if (isCurrentNext) {
+                // This is the current next piece - hide it but keep space
+                icon.style.visibility = 'hidden';
+                icon.classList.add('selected');
+                icon.classList.remove('disabled');
+            } else if (canAfford) {
+                // Can afford to select this piece - show it
+                icon.style.visibility = 'visible';
+                icon.style.border = '2px solid transparent';
+                icon.style.opacity = '0.7';
+                icon.classList.remove('selected', 'disabled');
+                icon.style.cursor = 'pointer';
+            } else {
+                // Can't afford - show but dimmed
+                icon.style.visibility = 'visible';
+                icon.style.border = '2px solid transparent';
+                icon.style.opacity = '0.3';
+                icon.classList.add('disabled');
+                icon.classList.remove('selected');
+                icon.style.cursor = 'not-allowed';
+            }
+        });
+    } else {
+        container.style.display = 'none';
+    }
+}
+
 function checkBoardMaxedOut(boardIndex: number): void {
     const board = boards[boardIndex];
     if (!board) return;
@@ -1329,6 +1721,7 @@ function checkBoardMaxedOut(boardIndex: number): void {
     if (isBoardMaxedOut(board) && !board.isMaxedOut) {
         board.isMaxedOut = true;
         updateUnlockNextBoardButton();
+        updatePrestigeButton();
         console.log(`Board ${boardIndex + 1} is maxed out!`);
     }
 }
@@ -1362,6 +1755,370 @@ function unlockNextBoard(): void {
     updateUnlockNextBoardButton();
     
     console.log(`Board ${newBoardIndex + 1} unlocked!`);
+}
+
+// =====================================================
+// PRESTIGE SYSTEM FUNCTIONS
+// =====================================================
+
+function canPrestige(): boolean {
+    // Must have all 7 boards AND board 7 must be maxed out AND have at least 5000 points
+    if (boards.length < MAX_BOARDS) return false;
+    const lastBoard = boards[MAX_BOARDS - 1];
+    if (!lastBoard || !isBoardMaxedOut(lastBoard)) return false;
+    if (globalLinesCleared < SCORE_PER_STAR) return false;
+    return true;
+}
+
+function getStarsFromScore(score: number): number {
+    return Math.floor(score / SCORE_PER_STAR);
+}
+
+function updatePrestigeButton(): void {
+    const button = document.getElementById('prestige-button') as HTMLButtonElement;
+    if (!button) return;
+    
+    if (canPrestige()) {
+        const starsToEarn = getStarsFromScore(globalLinesCleared);
+        button.style.display = 'block';
+        button.textContent = `⭐ Prestige (+${starsToEarn} ⭐)`;
+    } else {
+        button.style.display = 'none';
+    }
+}
+
+function performPrestige(): void {
+    if (!canPrestige()) return;
+    
+    // Calculate stars earned from current score (lines cleared)
+    const starsEarned = getStarsFromScore(globalLinesCleared);
+    prestigeStars += starsEarned;
+    prestigeCount++;
+    
+    console.log(`Prestige #${prestigeCount}! Earned ${starsEarned} stars. Total stars: ${prestigeStars}`);
+    
+    // Reset game state but keep prestige upgrades
+    resetForPrestige();
+    
+    // Show stars section now that player has prestiged
+    updateStarsDisplay();
+}
+
+function resetForPrestige(): void {
+    // Reset points but NOT score (globalLinesCleared persists)
+    globalPoints = 0;
+    
+    // Reset game over state
+    isGameOver = false;
+    isPaused = false;
+    
+    // Hide game over screen if showing
+    const gameOverScreen = document.getElementById('game-over-screen');
+    if (gameOverScreen) gameOverScreen.style.display = 'none';
+    
+    // Reset global upgrades
+    hardDropUnlocked = false;
+    
+    // Clear all boards
+    boards = [];
+    activeBoardIndex = 0;
+    
+    // Clear mini board slots
+    const miniBoardsColumn = document.getElementById('mini-boards-column');
+    if (miniBoardsColumn) {
+        miniBoardsColumn.style.display = 'none';
+        for (let i = 0; i < 6; i++) {
+            const slot = document.getElementById(`mini-board-slot-${i}`);
+            if (slot) {
+                slot.innerHTML = '';
+                slot.style.backgroundColor = 'rgba(50, 50, 50, 0.5)';
+            }
+        }
+    }
+    
+    // Remove any existing board containers except the first
+    const activeBoardContainer = document.getElementById('active-board-container');
+    if (activeBoardContainer) {
+        activeBoardContainer.innerHTML = '';
+        
+        // Recreate board 0 container
+        const board0Container = document.createElement('div');
+        board0Container.id = 'board-0-container';
+        board0Container.style.display = 'flex';
+        board0Container.style.gap = '20px';
+        board0Container.style.position = 'relative';
+        
+        // Move canvas back to board 0
+        board0Container.appendChild(canvas);
+        activeBoardContainer.appendChild(board0Container);
+    }
+    
+    // Create fresh board 0
+    const board0 = createBoard(0);
+    board0.canvas = canvas;
+    boards.push(board0);
+    
+    // Clear the canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Recreate UI for board 0
+    createBoardUI(0);
+    
+    // Start the game
+    spawnNewPiece(board0);
+    board0.lastDropTime = performance.now();
+    
+    // Update all displays
+    updatePointsDisplay();
+    updateGlobalHardDropButton();
+    updateUnlockNextBoardButton();
+    updatePrestigeButton();
+    updateBoardButtons(0);
+    updateControlsDisplay();
+    
+    console.log('Game reset for prestige. Permanent upgrades retained.');
+}
+
+function updateStarsDisplay(): void {
+    const starsSection = document.getElementById('stars-section');
+    const starsValue = document.getElementById('stars-value');
+    
+    if (prestigeCount > 0) {
+        if (starsSection) starsSection.style.display = 'block';
+        if (starsValue) starsValue.textContent = prestigeStars.toString();
+    } else {
+        if (starsSection) starsSection.style.display = 'none';
+    }
+}
+
+function openPrestigeShop(): void {
+    // Remove existing modal if any
+    const existingModal = document.getElementById('prestige-shop-overlay');
+    if (existingModal) existingModal.remove();
+    
+    // Create overlay
+    const overlay = document.createElement('div');
+    overlay.id = 'prestige-shop-overlay';
+    overlay.style.position = 'fixed';
+    overlay.style.top = '0';
+    overlay.style.left = '0';
+    overlay.style.width = '100%';
+    overlay.style.height = '100%';
+    overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
+    overlay.style.display = 'flex';
+    overlay.style.justifyContent = 'center';
+    overlay.style.alignItems = 'center';
+    overlay.style.zIndex = '3000';
+    
+    // Create modal
+    const modal = document.createElement('div');
+    modal.style.backgroundColor = '#1a1a1a';
+    modal.style.border = '2px solid #FFD700';
+    modal.style.borderRadius = '12px';
+    modal.style.padding = '30px';
+    modal.style.minWidth = '400px';
+    modal.style.maxWidth = '500px';
+    modal.style.color = 'white';
+    modal.style.fontFamily = 'Arial, sans-serif';
+    
+    // Title
+    const title = document.createElement('h2');
+    title.textContent = '⭐ Prestige Shop ⭐';
+    title.style.margin = '0 0 10px 0';
+    title.style.color = '#FFD700';
+    title.style.textAlign = 'center';
+    modal.appendChild(title);
+    
+    // Stars balance
+    const balance = document.createElement('div');
+    balance.style.textAlign = 'center';
+    balance.style.fontSize = '24px';
+    balance.style.marginBottom = '25px';
+    balance.style.color = '#FFD700';
+    balance.innerHTML = `Your Stars: <strong>${prestigeStars}</strong> ⭐`;
+    modal.appendChild(balance);
+    
+    // Prestige count
+    const prestigeInfo = document.createElement('div');
+    prestigeInfo.style.textAlign = 'center';
+    prestigeInfo.style.fontSize = '14px';
+    prestigeInfo.style.marginBottom = '25px';
+    prestigeInfo.style.color = '#888';
+    prestigeInfo.textContent = `Times Prestiged: ${prestigeCount}`;
+    modal.appendChild(prestigeInfo);
+    
+    // Upgrades container
+    const upgradesContainer = document.createElement('div');
+    upgradesContainer.style.display = 'flex';
+    upgradesContainer.style.flexDirection = 'column';
+    upgradesContainer.style.gap = '15px';
+    
+    // Cost Reduction upgrade
+    const costReductionUpgrade = createPrestigeUpgradeRow(
+        'Cost Reduction',
+        `Reduce all upgrade costs by 5% per level`,
+        costReductionLevel,
+        MAX_PRESTIGE_UPGRADE_LEVEL,
+        `Current: ${(costReductionLevel * 5)}% off`,
+        () => purchasePrestigeUpgrade('costReduction')
+    );
+    upgradesContainer.appendChild(costReductionUpgrade);
+    
+    // Points Multiplier upgrade
+    const pointsMultiplierUpgrade = createPrestigeUpgradeRow(
+        'Points Multiplier',
+        `Earn 10% more points per line per level`,
+        pointsMultiplierLevel,
+        MAX_PRESTIGE_UPGRADE_LEVEL,
+        `Current: ${(1 + pointsMultiplierLevel * 0.1).toFixed(1)}x`,
+        () => purchasePrestigeUpgrade('pointsMultiplier')
+    );
+    upgradesContainer.appendChild(pointsMultiplierUpgrade);
+    
+    modal.appendChild(upgradesContainer);
+    
+    // Shop status
+    const shopStatus = document.createElement('div');
+    shopStatus.id = 'shop-status';
+    shopStatus.style.textAlign = 'center';
+    shopStatus.style.marginTop = '20px';
+    shopStatus.style.fontSize = '14px';
+    shopStatus.style.color = '#888';
+    if (costReductionLevel >= MAX_PRESTIGE_UPGRADE_LEVEL && pointsMultiplierLevel >= MAX_PRESTIGE_UPGRADE_LEVEL) {
+        shopStatus.innerHTML = '<span style="color: #4CAF50;">✓ Shop Sold Out! All upgrades maxed.</span>';
+    }
+    modal.appendChild(shopStatus);
+    
+    // Close button
+    const closeButton = document.createElement('button');
+    closeButton.textContent = 'Close';
+    closeButton.style.display = 'block';
+    closeButton.style.margin = '25px auto 0';
+    closeButton.style.padding = '12px 40px';
+    closeButton.style.backgroundColor = '#FFD700';
+    closeButton.style.color = '#000';
+    closeButton.style.border = 'none';
+    closeButton.style.borderRadius = '6px';
+    closeButton.style.fontSize = '16px';
+    closeButton.style.fontWeight = 'bold';
+    closeButton.style.cursor = 'pointer';
+    
+    closeButton.addEventListener('click', () => overlay.remove());
+    modal.appendChild(closeButton);
+    
+    // Close on overlay click
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) overlay.remove();
+    });
+    
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+}
+
+function createPrestigeUpgradeRow(
+    name: string,
+    description: string,
+    currentLevel: number,
+    maxLevel: number,
+    currentEffect: string,
+    onPurchase: () => void
+): HTMLElement {
+    const row = document.createElement('div');
+    row.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+    row.style.borderRadius = '8px';
+    row.style.padding = '15px';
+    row.style.borderLeft = '3px solid #FFD700';
+    
+    const header = document.createElement('div');
+    header.style.display = 'flex';
+    header.style.justifyContent = 'space-between';
+    header.style.alignItems = 'center';
+    header.style.marginBottom = '8px';
+    
+    const nameEl = document.createElement('div');
+    nameEl.style.fontWeight = 'bold';
+    nameEl.style.fontSize = '16px';
+    nameEl.textContent = name;
+    
+    const levelEl = document.createElement('div');
+    levelEl.style.fontSize = '14px';
+    levelEl.style.color = '#888';
+    levelEl.textContent = `Level ${currentLevel}/${maxLevel}`;
+    
+    header.appendChild(nameEl);
+    header.appendChild(levelEl);
+    row.appendChild(header);
+    
+    const desc = document.createElement('div');
+    desc.style.fontSize = '12px';
+    desc.style.color = '#aaa';
+    desc.style.marginBottom = '8px';
+    desc.textContent = description;
+    row.appendChild(desc);
+    
+    const effectEl = document.createElement('div');
+    effectEl.style.fontSize = '13px';
+    effectEl.style.color = '#4CAF50';
+    effectEl.style.marginBottom = '10px';
+    effectEl.textContent = currentEffect;
+    row.appendChild(effectEl);
+    
+    const buyButton = document.createElement('button');
+    buyButton.style.width = '100%';
+    buyButton.style.padding = '8px';
+    buyButton.style.border = 'none';
+    buyButton.style.borderRadius = '4px';
+    buyButton.style.fontSize = '14px';
+    buyButton.style.fontWeight = 'bold';
+    buyButton.style.cursor = 'pointer';
+    buyButton.style.transition = 'all 0.2s ease';
+    
+    if (currentLevel >= maxLevel) {
+        buyButton.textContent = 'MAXED OUT';
+        buyButton.style.backgroundColor = '#888';
+        buyButton.style.color = '#ccc';
+        buyButton.style.cursor = 'default';
+        buyButton.disabled = true;
+    } else if (prestigeStars >= 1) {
+        buyButton.textContent = 'Upgrade (1 ⭐)';
+        buyButton.style.backgroundColor = '#FFD700';
+        buyButton.style.color = '#000';
+        buyButton.addEventListener('click', () => {
+            onPurchase();
+            // Refresh the shop
+            const overlay = document.getElementById('prestige-shop-overlay');
+            if (overlay) overlay.remove();
+            openPrestigeShop();
+        });
+    } else {
+        buyButton.textContent = 'Need 1 ⭐';
+        buyButton.style.backgroundColor = '#444';
+        buyButton.style.color = '#888';
+        buyButton.style.cursor = 'not-allowed';
+        buyButton.disabled = true;
+    }
+    
+    row.appendChild(buyButton);
+    return row;
+}
+
+function purchasePrestigeUpgrade(upgradeType: 'costReduction' | 'pointsMultiplier'): void {
+    if (prestigeStars < 1) return;
+    
+    if (upgradeType === 'costReduction' && costReductionLevel < MAX_PRESTIGE_UPGRADE_LEVEL) {
+        prestigeStars--;
+        costReductionLevel++;
+        console.log(`Cost Reduction upgraded to level ${costReductionLevel} (${costReductionLevel * 5}% off)`);
+    } else if (upgradeType === 'pointsMultiplier' && pointsMultiplierLevel < MAX_PRESTIGE_UPGRADE_LEVEL) {
+        prestigeStars--;
+        pointsMultiplierLevel++;
+        console.log(`Points Multiplier upgraded to level ${pointsMultiplierLevel} (${(1 + pointsMultiplierLevel * 0.1).toFixed(1)}x)`);
+    }
+    
+    updateStarsDisplay();
+    // Update all button costs since they may have changed
+    updateBoardButtons(activeBoardIndex);
+    updateUnlockNextBoardButton();
 }
 
 function minifyBoard(board: Board): void {
@@ -1462,7 +2219,10 @@ function updatePointsDisplay(): void {
             updateBoardButtons(i);
         }
         updateBoardLostOverlay(i);
+        updateTakeControlDisplay(i);
+        updateForceNextPieceUI(i);
     }
+    updatePrestigeButton();
 }
 
 function updateGlobalHardDropButton(): void {
@@ -1480,6 +2240,7 @@ function updateGlobalHardDropButton(): void {
         button.style.backgroundColor = '#2196F3';
         button.style.cursor = 'pointer';
         button.disabled = false;
+        showDialogue('global-harddrop', button);
     } else {
         button.style.display = 'none';
     }
@@ -1538,6 +2299,26 @@ function updateBoardButtons(boardIndex: number): void {
         } else {
             aiButton.style.display = 'none';
         }
+        // Trigger dialogue hints based on current state
+    if (!board.aiHired && globalPoints >= aiCost) {
+        const aiButton = document.getElementById(`ai-button-${boardIndex}`);
+        showDialogue('hire-ai', aiButton);
+    }
+    
+    if (board.aiHired && !board.aiHardDropUnlocked && globalPoints >= hardDropCost) {
+        const hdButton = document.getElementById(`ai-harddrop-button-${boardIndex}`);
+        showDialogue('ai-harddrop', hdButton);
+    }
+    
+    if (board.aiHired && board.aiHardDropUnlocked && board.aiSpeedLevel < MAX_AI_SPEED_UPGRADES && globalPoints >= speedCost) {
+        const speedButton = document.getElementById(`ai-speed-button-${boardIndex}`);
+        showDialogue('ai-speed', speedButton);
+    }
+    
+    if (isBoardMaxedOut(board) && boards.length < MAX_BOARDS) {
+        const unlockButton = document.getElementById('unlock-next-board-button');
+        showDialogue('unlock-board', unlockButton);
+    }
     }
     
     // AI Hard Drop Button
@@ -1583,6 +2364,35 @@ function updateBoardButtons(boardIndex: number): void {
             speedButton.style.display = 'none';
         }
     }
+    // Force Next Piece unlock button (available without AI)
+    const forceNextPieceCost = getBoardCost(BASE_COSTS.FORCE_NEXT_PIECE_UNLOCK, boardIndex);
+    const forceNextPieceButton = document.getElementById(`force-next-piece-button-${boardIndex}`) as HTMLButtonElement;
+    if (forceNextPieceButton) {
+        if (board.forceNextPieceUnlocked) {
+            // Already unlocked - show checkmark
+            forceNextPieceButton.textContent = 'Force Piece ✓';
+            forceNextPieceButton.style.display = 'block';
+            forceNextPieceButton.style.backgroundColor = '#888888';
+            forceNextPieceButton.style.cursor = 'default';
+            forceNextPieceButton.disabled = true;
+        } else if (globalPoints >= forceNextPieceCost) {
+            // Can afford - show button (no AI required)
+            forceNextPieceButton.style.display = 'block';
+            forceNextPieceButton.style.backgroundColor = '#9C27B0';
+            forceNextPieceButton.style.cursor = 'pointer';
+            forceNextPieceButton.disabled = false;
+            forceNextPieceButton.textContent = `Force Piece (${forceNextPieceCost} pts)`;
+        } else {
+            // Can't afford - hide button
+            forceNextPieceButton.style.display = 'none';
+        }
+    }
+    
+    // Update Force Next Piece icons
+    updateForceNextPieceUI(boardIndex);
+    
+    // Update Take Control button/counter
+    updateTakeControlDisplay(boardIndex);
 }
 
 function updateBoardStatus(boardIndex: number): void {
@@ -1864,24 +2674,19 @@ function resetGame(): void {
     
     // Reset global state
     isGameOver = false;
+    isPaused = false;
     globalPoints = 0;
     globalLinesCleared = 0;
     hardDropUnlocked = false;
-    forceNextPieceUnlocked = false;
     
-    // Clear all boards except first
-    while (boards.length > 1) {
-        const board = boards.pop()!;
-        if (board.container) {
-            board.container.remove();
-        }
-    }
+    // Clear all boards completely
+    boards = [];
+    activeBoardIndex = 0;
     
-    // Hide mini boards column
+    // Clear mini board slots
     const miniBoardsColumn = document.getElementById('mini-boards-column');
     if (miniBoardsColumn) {
         miniBoardsColumn.style.display = 'none';
-        // Clear all slots
         for (let i = 0; i < 6; i++) {
             const slot = document.getElementById(`mini-board-slot-${i}`);
             if (slot) {
@@ -1891,47 +2696,51 @@ function resetGame(): void {
         }
     }
     
-    // Reset first board
-    const board0 = boards[0];
-    board0.grid = createEmptyGrid();
-    board0.currentPiece = null;
-    board0.nextPiece = null;
-    board0.isGameOver = false;
-    board0.lastDropTime = performance.now();
-    board0.aiHired = false;
-    board0.aiEnabled = false;
-    board0.aiHardDropUnlocked = false;
-    board0.aiSpeedLevel = 0;
-    board0.aiSpeed = BASE_AI_SPEED;
-    board0.aiTargetPosition = null;
-    board0.aiMoving = false;
-    board0.isMaxedOut = false;
-    board0.isMinified = false;
-    board0.canvas = canvas;
-    
-    // Recreate board 0 UI if needed
+    // Remove any existing board containers and recreate board 0
     const activeBoardContainer = document.getElementById('active-board-container');
     if (activeBoardContainer) {
         activeBoardContainer.innerHTML = '';
         
+        // Recreate board 0 container
         const board0Container = document.createElement('div');
         board0Container.id = 'board-0-container';
         board0Container.style.display = 'flex';
         board0Container.style.gap = '20px';
         board0Container.style.position = 'relative';
         
+        // Move canvas back to board 0
         board0Container.appendChild(canvas);
         activeBoardContainer.appendChild(board0Container);
-        
-        createBoardUI(0);
     }
     
-    activeBoardIndex = 0;
+    // Create fresh board 0
+    const board0 = createBoard(0);
+    board0.canvas = canvas;
+    boards.push(board0);
     
+    // Clear the canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Recreate UI for board 0
+    createBoardUI(0);
+    
+    // Start the game
     spawnNewPiece(board0);
+    board0.lastDropTime = performance.now();
+    
+    // Update all displays
     updatePointsDisplay();
+    updateGlobalHardDropButton();
+    updateUnlockNextBoardButton();
+    updatePrestigeButton();
+    updateBoardButtons(0);
     updateControlsDisplay();
-    updateBoardStatus(0);
+    updateStarsDisplay();
+    
+    // Show welcome dialogue for new players
+    if (tutorialsEnabled && !shownDialogues.has('welcome')) {
+        showDialogue('welcome', null);
+    }
     
     console.log("Game reset!");
 }
@@ -2095,7 +2904,141 @@ function addTutorialControls(): void {
     
     tutorialControls.appendChild(checkbox);
     tutorialControls.appendChild(label);
+    
+    // Help button (question mark) to show all unlocked dialogues
+    const helpButton = document.createElement('button');
+    helpButton.id = 'help-button';
+    helpButton.textContent = '?';
+    helpButton.title = 'View all tutorials';
+    helpButton.style.width = '24px';
+    helpButton.style.height = '24px';
+    helpButton.style.borderRadius = '50%';
+    helpButton.style.border = '2px solid #4CAF50';
+    helpButton.style.backgroundColor = 'transparent';
+    helpButton.style.color = '#4CAF50';
+    helpButton.style.fontSize = '14px';
+    helpButton.style.fontWeight = 'bold';
+    helpButton.style.cursor = 'pointer';
+    helpButton.style.transition = 'all 0.2s ease';
+    
+    helpButton.addEventListener('mouseenter', () => {
+        helpButton.style.backgroundColor = '#4CAF50';
+        helpButton.style.color = 'white';
+    });
+    
+    helpButton.addEventListener('mouseleave', () => {
+        helpButton.style.backgroundColor = 'transparent';
+        helpButton.style.color = '#4CAF50';
+    });
+    
+    helpButton.addEventListener('click', showHelpModal);
+    
+    tutorialControls.appendChild(helpButton);
     controlsSection.appendChild(tutorialControls);
+}
+
+// Show all unlocked dialogues in a modal
+function showHelpModal(): void {
+    // Remove existing modal if any
+    const existingModal = document.getElementById('help-modal-overlay');
+    if (existingModal) existingModal.remove();
+    
+    // Create overlay
+    const overlay = document.createElement('div');
+    overlay.id = 'help-modal-overlay';
+    overlay.style.position = 'fixed';
+    overlay.style.top = '0';
+    overlay.style.left = '0';
+    overlay.style.width = '100%';
+    overlay.style.height = '100%';
+    overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+    overlay.style.display = 'flex';
+    overlay.style.justifyContent = 'center';
+    overlay.style.alignItems = 'center';
+    overlay.style.zIndex = '3000';
+    
+    // Create modal box
+    const modal = document.createElement('div');
+    modal.style.backgroundColor = '#1a1a1a';
+    modal.style.border = '2px solid #4CAF50';
+    modal.style.borderRadius = '12px';
+    modal.style.padding = '20px';
+    modal.style.maxWidth = '500px';
+    modal.style.maxHeight = '80vh';
+    modal.style.overflowY = 'auto';
+    modal.style.color = 'white';
+    modal.style.fontFamily = 'Arial, sans-serif';
+    
+    // Title
+    const title = document.createElement('h2');
+    title.textContent = 'Game Help';
+    title.style.margin = '0 0 20px 0';
+    title.style.color = '#4CAF50';
+    title.style.textAlign = 'center';
+    modal.appendChild(title);
+    
+    // Get all unlocked dialogues (from shownDialogues set)
+    const unlockedDialogues = Array.from(shownDialogues);
+    
+    if (unlockedDialogues.length === 0) {
+        const noContent = document.createElement('p');
+        noContent.textContent = 'No tutorials unlocked yet. Keep playing to discover new features!';
+        noContent.style.textAlign = 'center';
+        noContent.style.opacity = '0.7';
+        modal.appendChild(noContent);
+    } else {
+        // Show each unlocked dialogue
+        unlockedDialogues.forEach(dialogueId => {
+            const content = DIALOGUE_CONTENT[dialogueId];
+            if (!content) return;
+            
+            const entry = document.createElement('div');
+            entry.style.marginBottom = '15px';
+            entry.style.padding = '12px';
+            entry.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+            entry.style.borderRadius = '8px';
+            entry.style.borderLeft = '3px solid #4CAF50';
+            
+            const entryTitle = document.createElement('div');
+            entryTitle.textContent = content.title;
+            entryTitle.style.fontWeight = 'bold';
+            entryTitle.style.marginBottom = '5px';
+            entryTitle.style.color = '#4CAF50';
+            
+            const entryDesc = document.createElement('div');
+            entryDesc.textContent = content.description;
+            entryDesc.style.fontSize = '13px';
+            entryDesc.style.opacity = '0.9';
+            
+            entry.appendChild(entryTitle);
+            entry.appendChild(entryDesc);
+            modal.appendChild(entry);
+        });
+    }
+    
+    // Close button
+    const closeButton = document.createElement('button');
+    closeButton.textContent = 'Close';
+    closeButton.style.display = 'block';
+    closeButton.style.margin = '20px auto 0';
+    closeButton.style.padding = '10px 30px';
+    closeButton.style.backgroundColor = '#4CAF50';
+    closeButton.style.color = 'white';
+    closeButton.style.border = 'none';
+    closeButton.style.borderRadius = '6px';
+    closeButton.style.fontSize = '14px';
+    closeButton.style.cursor = 'pointer';
+    
+    closeButton.addEventListener('click', () => overlay.remove());
+    modal.appendChild(closeButton);
+    
+    // Close on overlay click
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) overlay.remove();
+    });
+    
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
 }
 
 // =====================================================
@@ -2192,6 +3135,34 @@ createGlobalHeader();
 createUI();
 createDialogueSystem();
 createGameOverScreen();
+updateStarsDisplay();
+updatePrestigeButton();
+
+// Show welcome dialogue on first game start
+if (tutorialsEnabled) {
+    showDialogue('welcome', null);
+}
+
+// DEBUG: Remove this after testing prestige
+const debugButton = document.createElement('button');
+debugButton.textContent = '🐛 DEBUG: Add 10k Score';
+debugButton.style.position = 'fixed';
+debugButton.style.bottom = '10px';
+debugButton.style.right = '10px';
+debugButton.style.padding = '10px 20px';
+debugButton.style.backgroundColor = '#ff0000';
+debugButton.style.color = 'white';
+debugButton.style.border = 'none';
+debugButton.style.borderRadius = '8px';
+debugButton.style.cursor = 'pointer';
+debugButton.style.zIndex = '9999';
+debugButton.addEventListener('click', () => {
+    globalLinesCleared = 10000;
+    globalPoints = 10000;
+    updatePointsDisplay();
+    console.log('DEBUG: Score set to 10000, Points set to 1000');
+});
+document.body.appendChild(debugButton);
 
 // Start the game
 board0.lastDropTime = performance.now();
