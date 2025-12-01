@@ -36,6 +36,12 @@ const MAX_BOARDS = 7;
 const TAKE_CONTROL_PIECES = 30;   // Number of pieces player controls when using Take Control
 
 // =====================================================
+// SUPABASE CONFIGURATION
+// =====================================================
+const SUPABASE_URL = 'https://ztqqtchilsqamylhsqqa.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp0cXF0Y2hpbHNxYW15bGhzcXFhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ1MjcxODgsImV4cCI6MjA4MDEwMzE4OH0.LiTMLJRGkjPUgXZ600F2v9IbHM3mdDySEcIVr4UT834';
+
+// =====================================================
 // COST CONFIGURATION
 // =====================================================
 // Base costs for Board 1 (index 0)
@@ -1044,6 +1050,34 @@ function createGlobalHeader(): void {
     starsSection.addEventListener('click', openPrestigeShop);
     
     header.appendChild(starsSection);
+    
+    // Leaderboard button
+    const leaderboardButton = document.createElement('button');
+    leaderboardButton.id = 'leaderboard-button';
+    leaderboardButton.textContent = '🏆 Leaderboard';
+    leaderboardButton.style.padding = '10px 20px';
+    leaderboardButton.style.fontSize = '14px';
+    leaderboardButton.style.fontWeight = 'bold';
+    leaderboardButton.style.backgroundColor = '#9C27B0';
+    leaderboardButton.style.color = 'white';
+    leaderboardButton.style.border = 'none';
+    leaderboardButton.style.borderRadius = '8px';
+    leaderboardButton.style.cursor = 'pointer';
+    leaderboardButton.style.transition = 'all 0.3s ease';
+    
+    leaderboardButton.addEventListener('mouseenter', () => {
+        leaderboardButton.style.backgroundColor = '#7B1FA2';
+        leaderboardButton.style.transform = 'scale(1.05)';
+    });
+    
+    leaderboardButton.addEventListener('mouseleave', () => {
+        leaderboardButton.style.backgroundColor = '#9C27B0';
+        leaderboardButton.style.transform = 'scale(1)';
+    });
+    
+    leaderboardButton.addEventListener('click', () => showLeaderboardModal(false));
+    
+    header.appendChild(leaderboardButton);
     header.appendChild(controlsSection);
     header.appendChild(globalUpgradesSection);
     
@@ -2558,14 +2592,8 @@ function createGameOverScreen(): void {
 }
 
 function showGameOverScreen(): void {
-    const overlay = document.getElementById('game-over-overlay');
-    if (!overlay) return;
-    
-    const finalScore = document.getElementById('final-score');
-    if (finalScore) finalScore.textContent = globalLinesCleared.toString();
-    
-    overlay.style.display = 'flex';
-    setTimeout(() => { overlay.style.opacity = '1'; }, 10);
+    // Show name entry instead of the old game over screen
+    showNameEntry();
 }
 
 function hideGameOverScreen(): void {
@@ -2743,6 +2771,470 @@ function resetGame(): void {
     }
     
     console.log("Game reset!");
+}
+
+// =====================================================
+// LEADERBOARD SYSTEM
+// =====================================================
+
+// Get the first day of current month in Pacific Time
+function getMonthStartPacific(): string {
+    const now = new Date();
+    // Convert to Pacific Time
+    const pacificTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
+    const year = pacificTime.getFullYear();
+    const month = pacificTime.getMonth();
+    // First day of month at midnight Pacific
+    const firstDay = new Date(year, month, 1, 0, 0, 0);
+    return firstDay.toISOString();
+}
+
+// Fetch top 10 scores for current month
+async function fetchLeaderboard(): Promise<{ name: string; score: number; created_at: string }[]> {
+    const monthStart = getMonthStartPacific();
+    
+    const response = await fetch(
+        `${SUPABASE_URL}/rest/v1/leaderboard?select=name,score,created_at&created_at=gte.${monthStart}&order=score.desc&limit=10`,
+        {
+            headers: {
+                'apikey': SUPABASE_ANON_KEY,
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+            }
+        }
+    );
+    
+    if (!response.ok) {
+        console.error('Failed to fetch leaderboard');
+        return [];
+    }
+    
+    return await response.json();
+}
+
+// Submit a score to the leaderboard
+async function submitScore(name: string, score: number): Promise<boolean> {
+    const response = await fetch(
+        `${SUPABASE_URL}/rest/v1/leaderboard`,
+        {
+            method: 'POST',
+            headers: {
+                'apikey': SUPABASE_ANON_KEY,
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                'Content-Type': 'application/json',
+                'Prefer': 'return=minimal'
+            },
+            body: JSON.stringify({
+                name: name.toUpperCase(),
+                score: score
+            })
+        }
+    );
+    
+    if (!response.ok) {
+        console.error('Failed to submit score');
+        return false;
+    }
+    
+    console.log(`Score submitted: ${name} - ${score}`);
+    return true;
+}
+
+// Show the leaderboard modal
+async function showLeaderboardModal(startNewGameOnClose: boolean): Promise<void> {
+    // Remove existing modal if any
+    const existingModal = document.getElementById('leaderboard-overlay');
+    if (existingModal) existingModal.remove();
+    
+    // Create overlay
+    const overlay = document.createElement('div');
+    overlay.id = 'leaderboard-overlay';
+    overlay.style.position = 'fixed';
+    overlay.style.top = '0';
+    overlay.style.left = '0';
+    overlay.style.width = '100%';
+    overlay.style.height = '100%';
+    overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+    overlay.style.display = 'flex';
+    overlay.style.justifyContent = 'center';
+    overlay.style.alignItems = 'center';
+    overlay.style.zIndex = '10000';
+    
+    // Create modal
+    const modal = document.createElement('div');
+    modal.style.backgroundColor = '#1a1a1a';
+    modal.style.border = '3px solid #9C27B0';
+    modal.style.borderRadius = '16px';
+    modal.style.padding = '30px 40px';
+    modal.style.minWidth = '350px';
+    modal.style.color = 'white';
+    modal.style.fontFamily = 'Arial, sans-serif';
+    modal.style.textAlign = 'center';
+    
+    // Title
+    const title = document.createElement('h2');
+    title.textContent = '🏆 MONTHLY LEADERBOARD 🏆';
+    title.style.margin = '0 0 10px 0';
+    title.style.color = '#FFD700';
+    title.style.fontSize = '24px';
+    modal.appendChild(title);
+    
+    // Month indicator
+    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                        'July', 'August', 'September', 'October', 'November', 'December'];
+    const now = new Date();
+    const monthLabel = document.createElement('div');
+    monthLabel.textContent = `${monthNames[now.getMonth()]} ${now.getFullYear()}`;
+    monthLabel.style.color = '#888';
+    monthLabel.style.fontSize = '14px';
+    monthLabel.style.marginBottom = '20px';
+    modal.appendChild(monthLabel);
+    
+    // Loading indicator
+    const loadingText = document.createElement('div');
+    loadingText.textContent = 'Loading...';
+    loadingText.style.color = '#888';
+    loadingText.style.padding = '20px';
+    modal.appendChild(loadingText);
+    
+    // Close instruction
+    const closeHint = document.createElement('div');
+    closeHint.textContent = startNewGameOnClose ? 'Click anywhere to play again' : 'Click anywhere to close';
+    closeHint.style.marginTop = '20px';
+    closeHint.style.color = '#666';
+    closeHint.style.fontSize = '12px';
+    modal.appendChild(closeHint);
+    
+    // Close on click
+    overlay.addEventListener('click', () => {
+        overlay.remove();
+        if (startNewGameOnClose) {
+            resetGameSkipWelcome();
+        }
+    });
+    
+    // Prevent modal clicks from closing
+    modal.addEventListener('click', (e) => e.stopPropagation());
+    
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    
+    // Fetch and display leaderboard
+    const scores = await fetchLeaderboard();
+    
+    // Remove loading text
+    loadingText.remove();
+    
+    // Create leaderboard table
+    const table = document.createElement('div');
+    table.style.textAlign = 'left';
+    
+    if (scores.length === 0) {
+        const noScores = document.createElement('div');
+        noScores.textContent = 'No scores yet this month. Be the first!';
+        noScores.style.color = '#888';
+        noScores.style.padding = '20px';
+        noScores.style.textAlign = 'center';
+        table.appendChild(noScores);
+    } else {
+        scores.forEach((entry, index) => {
+            const row = document.createElement('div');
+            row.style.display = 'flex';
+            row.style.justifyContent = 'space-between';
+            row.style.alignItems = 'center';
+            row.style.padding = '10px 15px';
+            row.style.borderRadius = '8px';
+            row.style.marginBottom = '5px';
+            
+            // Highlight top 3
+            if (index === 0) {
+                row.style.backgroundColor = 'rgba(255, 215, 0, 0.2)';
+                row.style.border = '1px solid #FFD700';
+            } else if (index === 1) {
+                row.style.backgroundColor = 'rgba(192, 192, 192, 0.2)';
+                row.style.border = '1px solid #C0C0C0';
+            } else if (index === 2) {
+                row.style.backgroundColor = 'rgba(205, 127, 50, 0.2)';
+                row.style.border = '1px solid #CD7F32';
+            } else {
+                row.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+            }
+            
+            // Rank
+            const rank = document.createElement('span');
+            rank.style.width = '30px';
+            rank.style.fontWeight = 'bold';
+            if (index === 0) rank.textContent = '🥇';
+            else if (index === 1) rank.textContent = '🥈';
+            else if (index === 2) rank.textContent = '🥉';
+            else rank.textContent = `${index + 1}.`;
+            rank.style.color = index < 3 ? '#FFD700' : '#888';
+            
+            // Name
+            const name = document.createElement('span');
+            name.textContent = entry.name;
+            name.style.fontWeight = 'bold';
+            name.style.fontSize = '18px';
+            name.style.letterSpacing = '2px';
+            name.style.flex = '1';
+            name.style.marginLeft = '10px';
+            
+            // Score
+            const score = document.createElement('span');
+            score.textContent = entry.score.toLocaleString();
+            score.style.color = '#4CAF50';
+            score.style.fontWeight = 'bold';
+            score.style.fontSize = '18px';
+            
+            row.appendChild(rank);
+            row.appendChild(name);
+            row.appendChild(score);
+            table.appendChild(row);
+        });
+    }
+    
+    // Insert table before close hint
+    modal.insertBefore(table, closeHint);
+}
+
+// Show arcade-style name entry
+function showNameEntry(): void {
+    // Remove existing modal if any
+    const existingModal = document.getElementById('name-entry-overlay');
+    if (existingModal) existingModal.remove();
+    
+    // Create overlay
+    const overlay = document.createElement('div');
+    overlay.id = 'name-entry-overlay';
+    overlay.style.position = 'fixed';
+    overlay.style.top = '0';
+    overlay.style.left = '0';
+    overlay.style.width = '100%';
+    overlay.style.height = '100%';
+    overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+    overlay.style.display = 'flex';
+    overlay.style.justifyContent = 'center';
+    overlay.style.alignItems = 'center';
+    overlay.style.zIndex = '10000';
+    
+    // Create modal
+    const modal = document.createElement('div');
+    modal.style.backgroundColor = '#1a1a1a';
+    modal.style.border = '3px solid #ff4444';
+    modal.style.borderRadius = '16px';
+    modal.style.padding = '40px';
+    modal.style.color = 'white';
+    modal.style.fontFamily = 'Arial, sans-serif';
+    modal.style.textAlign = 'center';
+    
+    // Game Over title
+    const title = document.createElement('h1');
+    title.textContent = 'GAME OVER';
+    title.style.margin = '0 0 10px 0';
+    title.style.color = '#ff4444';
+    title.style.fontSize = '36px';
+    modal.appendChild(title);
+    
+    // Score display
+    const scoreDisplay = document.createElement('div');
+    scoreDisplay.style.marginBottom = '30px';
+    scoreDisplay.innerHTML = `
+        <div style="color: #888; font-size: 14px;">YOUR SCORE</div>
+        <div style="color: #4CAF50; font-size: 48px; font-weight: bold;">${globalLinesCleared.toLocaleString()}</div>
+    `;
+    modal.appendChild(scoreDisplay);
+    
+    // Enter initials prompt
+    const prompt = document.createElement('div');
+    prompt.textContent = 'ENTER YOUR INITIALS';
+    prompt.style.color = '#FFD700';
+    prompt.style.fontSize = '18px';
+    prompt.style.marginBottom = '20px';
+    modal.appendChild(prompt);
+    
+    // Current selection state
+    let currentInitials = ['A', 'A', 'A'];
+    //let currentPosition = 0;
+    
+    // Initials display container
+    const initialsContainer = document.createElement('div');
+    initialsContainer.style.display = 'flex';
+    initialsContainer.style.justifyContent = 'center';
+    initialsContainer.style.gap = '15px';
+    initialsContainer.style.marginBottom = '30px';
+    
+    // Create 3 letter selectors
+    const letterDisplays: HTMLDivElement[] = [];
+    
+    for (let i = 0; i < 3; i++) {
+        const letterBox = document.createElement('div');
+        letterBox.style.display = 'flex';
+        letterBox.style.flexDirection = 'column';
+        letterBox.style.alignItems = 'center';
+        
+        // Up arrow
+        const upArrow = document.createElement('button');
+        upArrow.textContent = '▲';
+        upArrow.style.backgroundColor = 'transparent';
+        upArrow.style.border = 'none';
+        upArrow.style.color = '#4CAF50';
+        upArrow.style.fontSize = '24px';
+        upArrow.style.cursor = 'pointer';
+        upArrow.style.padding = '5px 15px';
+        upArrow.addEventListener('click', () => {
+            const charCode = currentInitials[i].charCodeAt(0);
+            currentInitials[i] = charCode >= 90 ? 'A' : String.fromCharCode(charCode + 1);
+            letterDisplays[i].textContent = currentInitials[i];
+        });
+        
+        // Letter display
+        const letterDisplay = document.createElement('div');
+        letterDisplay.textContent = currentInitials[i];
+        letterDisplay.style.width = '50px';
+        letterDisplay.style.height = '60px';
+        letterDisplay.style.backgroundColor = '#333';
+        letterDisplay.style.border = '2px solid #4CAF50';
+        letterDisplay.style.borderRadius = '8px';
+        letterDisplay.style.display = 'flex';
+        letterDisplay.style.justifyContent = 'center';
+        letterDisplay.style.alignItems = 'center';
+        letterDisplay.style.fontSize = '36px';
+        letterDisplay.style.fontWeight = 'bold';
+        letterDisplay.style.fontFamily = 'monospace';
+        letterDisplays.push(letterDisplay);
+        
+        // Down arrow
+        const downArrow = document.createElement('button');
+        downArrow.textContent = '▼';
+        downArrow.style.backgroundColor = 'transparent';
+        downArrow.style.border = 'none';
+        downArrow.style.color = '#4CAF50';
+        downArrow.style.fontSize = '24px';
+        downArrow.style.cursor = 'pointer';
+        downArrow.style.padding = '5px 15px';
+        downArrow.addEventListener('click', () => {
+            const charCode = currentInitials[i].charCodeAt(0);
+            currentInitials[i] = charCode <= 65 ? 'Z' : String.fromCharCode(charCode - 1);
+            letterDisplays[i].textContent = currentInitials[i];
+        });
+        
+        letterBox.appendChild(upArrow);
+        letterBox.appendChild(letterDisplay);
+        letterBox.appendChild(downArrow);
+        initialsContainer.appendChild(letterBox);
+    }
+    
+    modal.appendChild(initialsContainer);
+    
+    // Submit button
+    const submitButton = document.createElement('button');
+    submitButton.textContent = 'SUBMIT SCORE';
+    submitButton.style.padding = '15px 40px';
+    submitButton.style.fontSize = '18px';
+    submitButton.style.fontWeight = 'bold';
+    submitButton.style.backgroundColor = '#4CAF50';
+    submitButton.style.color = 'white';
+    submitButton.style.border = 'none';
+    submitButton.style.borderRadius = '8px';
+    submitButton.style.cursor = 'pointer';
+    submitButton.style.transition = 'all 0.3s ease';
+    
+    submitButton.addEventListener('mouseenter', () => {
+        submitButton.style.backgroundColor = '#45a049';
+        submitButton.style.transform = 'scale(1.05)';
+    });
+    
+    submitButton.addEventListener('mouseleave', () => {
+        submitButton.style.backgroundColor = '#4CAF50';
+        submitButton.style.transform = 'scale(1)';
+    });
+    
+    submitButton.addEventListener('click', async () => {
+        const name = currentInitials.join('');
+        submitButton.textContent = 'SUBMITTING...';
+        submitButton.disabled = true;
+        
+        await submitScore(name, globalLinesCleared);
+        
+        // Remove name entry and show leaderboard
+        overlay.remove();
+        showLeaderboardModal(true);
+    });
+    
+    modal.appendChild(submitButton);
+    
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+}
+
+// Reset game but skip welcome dialogue
+function resetGameSkipWelcome(): void {
+    hideGameOverScreen();
+    
+    // Reset global state
+    isGameOver = false;
+    isPaused = false;
+    globalPoints = 0;
+    globalLinesCleared = 0;
+    hardDropUnlocked = false;
+    
+    // Clear all boards completely
+    boards = [];
+    activeBoardIndex = 0;
+    
+    // Clear mini board slots
+    const miniBoardsColumn = document.getElementById('mini-boards-column');
+    if (miniBoardsColumn) {
+        miniBoardsColumn.style.display = 'none';
+        for (let i = 0; i < 6; i++) {
+            const slot = document.getElementById(`mini-board-slot-${i}`);
+            if (slot) {
+                slot.innerHTML = '';
+                slot.style.backgroundColor = 'rgba(50, 50, 50, 0.5)';
+            }
+        }
+    }
+    
+    // Remove any existing board containers and recreate board 0
+    const activeBoardContainer = document.getElementById('active-board-container');
+    if (activeBoardContainer) {
+        activeBoardContainer.innerHTML = '';
+        
+        const board0Container = document.createElement('div');
+        board0Container.id = 'board-0-container';
+        board0Container.style.display = 'flex';
+        board0Container.style.gap = '20px';
+        board0Container.style.position = 'relative';
+        
+        board0Container.appendChild(canvas);
+        activeBoardContainer.appendChild(board0Container);
+    }
+    
+    // Create fresh board 0
+    const board0 = createBoard(0);
+    board0.canvas = canvas;
+    boards.push(board0);
+    
+    // Clear the canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Recreate UI for board 0
+    createBoardUI(0);
+    
+    // Start the game
+    spawnNewPiece(board0);
+    board0.lastDropTime = performance.now();
+    
+    // Update all displays
+    updatePointsDisplay();
+    updateGlobalHardDropButton();
+    updateUnlockNextBoardButton();
+    updatePrestigeButton();
+    updateBoardButtons(0);
+    updateControlsDisplay();
+    updateStarsDisplay();
+    
+    // Skip welcome dialogue - go straight to playing
+    console.log("Game reset (welcome skipped)!");
 }
 
 // =====================================================
