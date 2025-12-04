@@ -48,17 +48,17 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const BASE_COSTS = {
     HARD_DROP: 1,                  // Global hard drop unlock
     HIRE_AI: 5,                    // Hire AI for a board
-    AI_HARD_DROP: 5,               // AI hard drop upgrade
-    AI_SPEED: 10,                  // Per speed level (5 levels total)
-    UNLOCK_NEXT_BOARD: 25,         // Cost to unlock board 2
-    RESET_BOARD: 10,               // Cost to reset board 1 after loss
-    FORCE_NEXT_PIECE_UNLOCK: 20,   // Unlock force next piece feature
-    FORCE_NEXT_PIECE_USE: 5,       // Cost per use
-    TAKE_CONTROL: 30,              // Cost to pause AI and take control for 30 pieces
+    AI_HARD_DROP: 10,               // AI hard drop upgrade
+    AI_SPEED: 5,                  // Per speed level (5 levels total)
+    UNLOCK_NEXT_BOARD: 15,         // Cost to unlock board 2
+    RESET_BOARD: 5,               // Cost to reset board 1 after loss
+    FORCE_NEXT_PIECE_UNLOCK: 5,   // Unlock force next piece feature
+    FORCE_NEXT_PIECE_USE: 1,       // Cost per use
+    TAKE_CONTROL: 5,              // Cost to pause AI and take control for 30 pieces
 };
 
 // Cost multiplier per board tier (1.5x each board)
-const COST_MULTIPLIER = 1.5;
+const COST_MULTIPLIER = 2;
 
 // =====================================================
 // COST CALCULATION FUNCTIONS
@@ -217,9 +217,9 @@ let prestigeStars: number = 0;           // Spendable prestige currency
 let costReductionLevel: number = 0;      // 0-10, each level = 5% reduction
 let pointsMultiplierLevel: number = 0;   // 0-10, each level = 0.1x bonus
 
-const MAX_PRESTIGE_UPGRADE_LEVEL = 10;
-const COST_REDUCTION_PER_LEVEL = 0.05;   // 5% per level
-const POINTS_MULTIPLIER_PER_LEVEL = 0.1; // 0.1x per level
+const MAX_PRESTIGE_UPGRADE_LEVEL = 4;
+const COST_REDUCTION_PER_LEVEL = 0.2;   // 20% per level
+const POINTS_MULTIPLIER_PER_LEVEL = 2; // 2x per level
 const SCORE_PER_STAR = 5000;             // 5000 score (lines) = 1 star
 
 const DIALOGUE_CONTENT: { [key: string]: { title: string; description: string } } = {
@@ -955,52 +955,57 @@ function createGlobalHeader(): void {
     header.style.left = '0';
     header.style.right = '0';
     header.style.height = '120px';
-    header.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
-    header.style.borderBottom = '2px solid #444';
+    header.style.backgroundColor = 'rgba(26, 26, 46, 0.95)';
+    header.style.borderBottom = '2px solid #2d2d44';
     header.style.display = 'flex';
     header.style.alignItems = 'center';
     header.style.justifyContent = 'center';
-    header.style.gap = '60px';
+    header.style.gap = '40px';
     header.style.padding = '20px';
     header.style.zIndex = '1000';
-    header.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.3)';
+    header.style.boxShadow = '0 4px 20px rgba(0, 0, 0, 0.5), 0 0 40px rgba(0, 212, 255, 0.1)';
     
-    // Title section
+    // Title section with logo image
     const titleSection = document.createElement('div');
     titleSection.style.textAlign = 'center';
+    titleSection.style.display = 'flex';
+    titleSection.style.alignItems = 'center';
     
-    const title = document.createElement('h1');
-    title.textContent = 'IDLETRIS';
-    title.style.margin = '0';
-    title.style.fontSize = '36px';
-    title.style.color = '#4CAF50';
-    title.style.textShadow = '3px 3px 6px rgba(0,0,0,0.7)';
-    title.style.fontFamily = 'Arial, sans-serif';
-    title.style.letterSpacing = '4px';
-    titleSection.appendChild(title);
+    // Use PNG logo image
+    const logo = document.createElement('img');
+    logo.src = '/web-logo-transparent.png';
+    logo.alt = 'IDLETRIS';
+    logo.style.width = '120px';
+    logo.style.height = 'auto';
+    logo.style.filter = 'drop-shadow(0 0 8px rgba(255, 255, 255, 0.3))';
+    titleSection.appendChild(logo);
     
-    // Points section
+    // Points section - neon green glow
     const pointsSection = document.createElement('div');
     pointsSection.style.textAlign = 'center';
-    pointsSection.style.padding = '15px 30px';
-    pointsSection.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
-    pointsSection.style.borderRadius = '10px';
+    pointsSection.style.padding = '15px 25px';
+    pointsSection.style.backgroundColor = 'rgba(0, 255, 136, 0.1)';
+    pointsSection.style.borderRadius = '8px';
+    pointsSection.style.border = '1px solid rgba(0, 255, 136, 0.3)';
+    pointsSection.style.boxShadow = '0 0 20px rgba(0, 255, 136, 0.2), inset 0 0 20px rgba(0, 255, 136, 0.05)';
     pointsSection.innerHTML = `
-        <div style="font-size: 14px; color: #888; margin-bottom: 5px;">Points</div>
-        <div style="font-size: 32px; font-weight: bold; color: #4CAF50;">
+        <div style="font-size: 10px; font-family: 'Press Start 2P', cursive; color: #00ff88; margin-bottom: 8px; text-shadow: 0 0 10px rgba(0, 255, 136, 0.5);">POINTS</div>
+        <div style="font-size: 28px; font-weight: bold; color: #00ff88; text-shadow: 0 0 10px #00ff88, 0 0 20px #00cc6a;">
             <span id="global-points-value">0</span>
         </div>
     `;
     
-    // Score section (global lines)
+    // Score section - neon blue glow
     const scoreSection = document.createElement('div');
     scoreSection.style.textAlign = 'center';
-    scoreSection.style.padding = '15px 30px';
-    scoreSection.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
-    scoreSection.style.borderRadius = '10px';
+    scoreSection.style.padding = '15px 25px';
+    scoreSection.style.backgroundColor = 'rgba(0, 212, 255, 0.1)';
+    scoreSection.style.borderRadius = '8px';
+    scoreSection.style.border = '1px solid rgba(0, 212, 255, 0.3)';
+    scoreSection.style.boxShadow = '0 0 20px rgba(0, 212, 255, 0.2), inset 0 0 20px rgba(0, 212, 255, 0.05)';
     scoreSection.innerHTML = `
-        <div style="font-size: 14px; color: #888; margin-bottom: 5px;">Score</div>
-        <div style="font-size: 32px; font-weight: bold; color: #2196F3;">
+        <div style="font-size: 10px; font-family: 'Press Start 2P', cursive; color: #00d4ff; margin-bottom: 8px; text-shadow: 0 0 10px rgba(0, 212, 255, 0.5);">SCORE</div>
+        <div style="font-size: 28px; font-weight: bold; color: #00d4ff; text-shadow: 0 0 10px #00d4ff, 0 0 20px #0099cc;">
             <span id="global-score-value">0</span>
         </div>
     `;
@@ -1051,28 +1056,41 @@ function createGlobalHeader(): void {
     
     header.appendChild(starsSection);
     
-    // Leaderboard button
+    // Leaderboard button - gold arcade style
     const leaderboardButton = document.createElement('button');
     leaderboardButton.id = 'leaderboard-button';
     leaderboardButton.textContent = '🏆 Leaderboard';
-    leaderboardButton.style.padding = '10px 20px';
-    leaderboardButton.style.fontSize = '14px';
+    leaderboardButton.style.padding = '12px 24px';
+    leaderboardButton.style.fontSize = '12px';
     leaderboardButton.style.fontWeight = 'bold';
-    leaderboardButton.style.backgroundColor = '#9C27B0';
-    leaderboardButton.style.color = 'white';
+    leaderboardButton.style.fontFamily = "'Press Start 2P', cursive";
+    leaderboardButton.style.background = 'linear-gradient(180deg, #ffd700 0%, #cc9900 100%)';
+    leaderboardButton.style.color = '#000';
     leaderboardButton.style.border = 'none';
-    leaderboardButton.style.borderRadius = '8px';
+    leaderboardButton.style.borderRadius = '4px';
     leaderboardButton.style.cursor = 'pointer';
-    leaderboardButton.style.transition = 'all 0.3s ease';
+    leaderboardButton.style.transition = 'all 0.15s ease';
+    leaderboardButton.style.boxShadow = '0 4px 0 #997700, 0 0 15px rgba(255, 215, 0, 0.4)';
+    leaderboardButton.style.textTransform = 'uppercase';
     
     leaderboardButton.addEventListener('mouseenter', () => {
-        leaderboardButton.style.backgroundColor = '#7B1FA2';
-        leaderboardButton.style.transform = 'scale(1.05)';
+        leaderboardButton.style.transform = 'translateY(-2px)';
+        leaderboardButton.style.boxShadow = '0 6px 0 #997700, 0 0 25px rgba(255, 215, 0, 0.6)';
     });
     
     leaderboardButton.addEventListener('mouseleave', () => {
-        leaderboardButton.style.backgroundColor = '#9C27B0';
-        leaderboardButton.style.transform = 'scale(1)';
+        leaderboardButton.style.transform = 'translateY(0)';
+        leaderboardButton.style.boxShadow = '0 4px 0 #997700, 0 0 15px rgba(255, 215, 0, 0.4)';
+    });
+    
+    leaderboardButton.addEventListener('mousedown', () => {
+        leaderboardButton.style.transform = 'translateY(2px)';
+        leaderboardButton.style.boxShadow = '0 2px 0 #997700, 0 0 10px rgba(255, 215, 0, 0.4)';
+    });
+    
+    leaderboardButton.addEventListener('mouseup', () => {
+        leaderboardButton.style.transform = 'translateY(-2px)';
+        leaderboardButton.style.boxShadow = '0 6px 0 #997700, 0 0 25px rgba(255, 215, 0, 0.6)';
     });
     
     leaderboardButton.addEventListener('click', () => showLeaderboardModal(false));
@@ -1096,26 +1114,31 @@ function createGlobalHardDropButton(): void {
     hardDropButton.id = 'global-harddrop-button';
     hardDropButton.textContent = `Unlock Hard Drop (${BASE_COSTS.HARD_DROP} pt)`;
     hardDropButton.style.display = 'none';
-    hardDropButton.style.padding = '10px 20px';
-    hardDropButton.style.fontSize = '14px';
+    hardDropButton.style.padding = '12px 20px';
+    hardDropButton.style.fontSize = '10px';
     hardDropButton.style.fontWeight = 'bold';
-    hardDropButton.style.backgroundColor = '#2196F3';
-    hardDropButton.style.color = 'white';
+    hardDropButton.style.fontFamily = "'Press Start 2P', cursive";
+    hardDropButton.style.background = 'linear-gradient(180deg, #00d4ff 0%, #0099cc 100%)';
+    hardDropButton.style.color = '#000';
     hardDropButton.style.border = 'none';
-    hardDropButton.style.borderRadius = '8px';
+    hardDropButton.style.borderRadius = '4px';
     hardDropButton.style.cursor = 'pointer';
-    hardDropButton.style.transition = 'all 0.3s ease';
+    hardDropButton.style.transition = 'all 0.15s ease';
+    hardDropButton.style.boxShadow = '0 4px 0 #007799, 0 0 15px rgba(0, 212, 255, 0.4)';
+    hardDropButton.style.textTransform = 'uppercase';
     
     hardDropButton.addEventListener('mouseenter', () => {
         if (!hardDropButton.disabled) {
-            hardDropButton.style.backgroundColor = '#1976D2';
-            hardDropButton.style.transform = 'scale(1.05)';
+            hardDropButton.style.transform = 'translateY(-2px)';
+            hardDropButton.style.boxShadow = '0 6px 0 #007799, 0 0 25px rgba(0, 212, 255, 0.6)';
         }
     });
     
     hardDropButton.addEventListener('mouseleave', () => {
-        hardDropButton.style.backgroundColor = hardDropButton.disabled ? '#888888' : '#2196F3';
-        hardDropButton.style.transform = 'scale(1)';
+        if (!hardDropButton.disabled) {
+            hardDropButton.style.transform = 'translateY(0)';
+            hardDropButton.style.boxShadow = '0 4px 0 #007799, 0 0 15px rgba(0, 212, 255, 0.4)';
+        }
     });
     
     hardDropButton.addEventListener('click', purchaseHardDrop);
@@ -1130,59 +1153,117 @@ function createUnlockNextBoardButton(): void {
     const unlockButton = document.createElement('button');
     unlockButton.id = 'unlock-next-board-button';
     unlockButton.style.display = 'none';
-    unlockButton.style.padding = '10px 20px';
-    unlockButton.style.fontSize = '14px';
+    unlockButton.style.padding = '12px 20px';
+    unlockButton.style.fontSize = '10px';
     unlockButton.style.fontWeight = 'bold';
-    unlockButton.style.backgroundColor = '#FF5722';
-    unlockButton.style.color = 'white';
+    unlockButton.style.fontFamily = "'Press Start 2P', cursive";
+    unlockButton.style.background = 'linear-gradient(180deg, #ff9f43 0%, #ff6b00 100%)';
+    unlockButton.style.color = '#000';
     unlockButton.style.border = 'none';
-    unlockButton.style.borderRadius = '8px';
+    unlockButton.style.borderRadius = '4px';
     unlockButton.style.cursor = 'pointer';
-    unlockButton.style.transition = 'all 0.3s ease';
+    unlockButton.style.transition = 'all 0.15s ease';
+    unlockButton.style.boxShadow = '0 4px 0 #cc5500, 0 0 15px rgba(255, 159, 67, 0.4)';
+    unlockButton.style.textTransform = 'uppercase';
     
     unlockButton.addEventListener('mouseenter', () => {
         if (!unlockButton.disabled) {
-            unlockButton.style.backgroundColor = '#E64A19';
-            unlockButton.style.transform = 'scale(1.05)';
+            unlockButton.style.transform = 'translateY(-2px)';
+            unlockButton.style.boxShadow = '0 6px 0 #cc5500, 0 0 25px rgba(255, 159, 67, 0.6)';
         }
     });
     
     unlockButton.addEventListener('mouseleave', () => {
-        unlockButton.style.backgroundColor = unlockButton.disabled ? '#888888' : '#FF5722';
-        unlockButton.style.transform = 'scale(1)';
+        if (!unlockButton.disabled) {
+            unlockButton.style.transform = 'translateY(0)';
+            unlockButton.style.boxShadow = '0 4px 0 #cc5500, 0 0 15px rgba(255, 159, 67, 0.4)';
+        }
     });
     
     unlockButton.addEventListener('click', unlockNextBoard);
     
     globalUpgradesSection.appendChild(unlockButton);
     
-    // Prestige button (appears when board 7 is maxed and player has 5000+ points)
+    // Prestige button - special gold with extra glow
     const prestigeButton = document.createElement('button');
     prestigeButton.id = 'prestige-button';
     prestigeButton.style.display = 'none';
-    prestigeButton.style.padding = '10px 20px';
-    prestigeButton.style.fontSize = '14px';
+    prestigeButton.style.padding = '12px 24px';
+    prestigeButton.style.fontSize = '10px';
     prestigeButton.style.fontWeight = 'bold';
-    prestigeButton.style.backgroundColor = '#FFD700';
+    prestigeButton.style.fontFamily = "'Press Start 2P', cursive";
+    prestigeButton.style.background = 'linear-gradient(180deg, #ffd700 0%, #ffaa00 50%, #cc9900 100%)';
     prestigeButton.style.color = '#000';
-    prestigeButton.style.border = 'none';
-    prestigeButton.style.borderRadius = '8px';
+    prestigeButton.style.border = '2px solid #ffee88';
+    prestigeButton.style.borderRadius = '4px';
     prestigeButton.style.cursor = 'pointer';
-    prestigeButton.style.transition = 'all 0.3s ease';
+    prestigeButton.style.transition = 'all 0.15s ease';
+    prestigeButton.style.boxShadow = '0 4px 0 #997700, 0 0 20px rgba(255, 215, 0, 0.6), 0 0 40px rgba(255, 215, 0, 0.3)';
+    prestigeButton.style.textTransform = 'uppercase';
+    prestigeButton.style.animation = 'pulse-gold 2s infinite';
     
     prestigeButton.addEventListener('mouseenter', () => {
-        prestigeButton.style.backgroundColor = '#FFC000';
-        prestigeButton.style.transform = 'scale(1.05)';
+        prestigeButton.style.transform = 'translateY(-2px)';
+        prestigeButton.style.boxShadow = '0 6px 0 #997700, 0 0 30px rgba(255, 215, 0, 0.8), 0 0 60px rgba(255, 215, 0, 0.4)';
     });
     
     prestigeButton.addEventListener('mouseleave', () => {
-        prestigeButton.style.backgroundColor = '#FFD700';
-        prestigeButton.style.transform = 'scale(1)';
+        prestigeButton.style.transform = 'translateY(0)';
+        prestigeButton.style.boxShadow = '0 4px 0 #997700, 0 0 20px rgba(255, 215, 0, 0.6), 0 0 40px rgba(255, 215, 0, 0.3)';
     });
     
     prestigeButton.addEventListener('click', performPrestige);
     
     globalUpgradesSection.appendChild(prestigeButton);
+}
+
+// Helper function to apply arcade button styling
+function applyArcadeButtonStyle(
+    button: HTMLButtonElement, 
+    colorType: 'green' | 'blue' | 'orange' | 'purple' | 'gold' | 'disabled'
+): void {
+    button.style.padding = '10px 16px';
+    button.style.fontSize = '11px';
+    button.style.fontWeight = 'bold';
+    button.style.border = 'none';
+    button.style.borderRadius = '4px';
+    button.style.cursor = colorType === 'disabled' ? 'not-allowed' : 'pointer';
+    button.style.transition = 'all 0.15s ease';
+    button.style.width = '100%';
+    button.style.marginBottom = '8px';
+    
+    switch (colorType) {
+        case 'green':
+            button.style.background = 'linear-gradient(180deg, #00ff88 0%, #00cc6a 100%)';
+            button.style.color = '#000';
+            button.style.boxShadow = '0 3px 0 #009950, 0 0 10px rgba(0, 255, 136, 0.3)';
+            break;
+        case 'blue':
+            button.style.background = 'linear-gradient(180deg, #00d4ff 0%, #0099cc 100%)';
+            button.style.color = '#000';
+            button.style.boxShadow = '0 3px 0 #007799, 0 0 10px rgba(0, 212, 255, 0.3)';
+            break;
+        case 'orange':
+            button.style.background = 'linear-gradient(180deg, #ff9f43 0%, #ff6b00 100%)';
+            button.style.color = '#000';
+            button.style.boxShadow = '0 3px 0 #cc5500, 0 0 10px rgba(255, 159, 67, 0.3)';
+            break;
+        case 'purple':
+            button.style.background = 'linear-gradient(180deg, #bf5fff 0%, #9932cc 100%)';
+            button.style.color = '#fff';
+            button.style.boxShadow = '0 3px 0 #7722aa, 0 0 10px rgba(191, 95, 255, 0.3)';
+            break;
+        case 'gold':
+            button.style.background = 'linear-gradient(180deg, #ffd700 0%, #cc9900 100%)';
+            button.style.color = '#000';
+            button.style.boxShadow = '0 3px 0 #997700, 0 0 10px rgba(255, 215, 0, 0.3)';
+            break;
+        case 'disabled':
+            button.style.background = 'linear-gradient(180deg, #555566 0%, #333344 100%)';
+            button.style.color = '#888';
+            button.style.boxShadow = '0 3px 0 #222233';
+            break;
+    }
 }
 
 function createPieceIcon(pieceType: PieceType, boardIndex: number): HTMLImageElement {
@@ -1230,10 +1311,10 @@ function createUI(): void {
     gameContainer.style.gap = '20px';
     gameContainer.style.alignItems = 'flex-start';
     
-    // Create mini boards column (for slots)
+    // Create mini boards column (for slots) - always visible to show progression
     const miniBoardsColumn = document.createElement('div');
     miniBoardsColumn.id = 'mini-boards-column';
-    miniBoardsColumn.style.display = 'none';  // Hidden until we have mini boards
+    miniBoardsColumn.style.display = 'flex';  // Always visible now
     miniBoardsColumn.style.flexDirection = 'column';
     miniBoardsColumn.style.gap = '10px';
     
@@ -1251,9 +1332,56 @@ function createUI(): void {
             slot.className = 'mini-board-slot';
             slot.style.width = `${BOARD_WIDTH_MINI + PADDING_MINI * 2}px`;
             slot.style.height = `${BOARD_HEIGHT_MINI + PADDING_MINI * 2}px`;
-            slot.style.backgroundColor = 'rgba(50, 50, 50, 0.5)';
+            slot.style.backgroundColor = 'rgba(30, 30, 30, 0.8)';
             slot.style.borderRadius = '8px';
             slot.style.position = 'relative';
+            slot.style.border = '2px dashed rgba(100, 100, 100, 0.5)';
+            
+            // Create lock overlay for empty slots
+            const lockOverlay = document.createElement('div');
+            lockOverlay.id = `slot-lock-${slotIndex}`;
+            lockOverlay.style.position = 'absolute';
+            lockOverlay.style.top = '0';
+            lockOverlay.style.left = '0';
+            lockOverlay.style.width = '100%';
+            lockOverlay.style.height = '100%';
+            lockOverlay.style.display = 'flex';
+            lockOverlay.style.flexDirection = 'column';
+            lockOverlay.style.justifyContent = 'center';
+            lockOverlay.style.alignItems = 'center';
+            lockOverlay.style.borderRadius = '6px';
+            
+            // Lock icon
+            const lockIcon = document.createElement('div');
+            lockIcon.className = 'lock-icon';
+            lockIcon.textContent = '🔒';
+            lockIcon.style.fontSize = '24px';
+            lockIcon.style.marginBottom = '5px';
+            lockIcon.style.opacity = '0.6';
+            
+            // Board number label
+            const boardLabel = document.createElement('div');
+            boardLabel.className = 'board-label';
+            boardLabel.textContent = `Board ${slotIndex + 2}`;
+            boardLabel.style.fontSize = '10px';
+            boardLabel.style.color = 'rgba(255, 255, 255, 0.5)';
+            boardLabel.style.fontWeight = 'bold';
+            
+            // Unlock cost display
+            const unlockCost = document.createElement('div');
+            unlockCost.className = 'unlock-cost';
+            // Calculate cost for this slot's board (slot 0 = board 2, etc.)
+            const cost = Math.round(BASE_COSTS.UNLOCK_NEXT_BOARD * Math.pow(COST_MULTIPLIER, slotIndex));
+            unlockCost.textContent = `${cost} pts`;
+            unlockCost.style.fontSize = '9px';
+            unlockCost.style.color = 'rgba(255, 255, 255, 0.4)';
+            unlockCost.style.marginTop = '2px';
+            
+            lockOverlay.appendChild(lockIcon);
+            lockOverlay.appendChild(boardLabel);
+            lockOverlay.appendChild(unlockCost);
+            slot.appendChild(lockOverlay);
+            
             slotRow.appendChild(slot);
         }
         
@@ -1403,62 +1531,32 @@ function createBoardUpgradeButtons(boardIndex: number): void {
     const board = boards[boardIndex];
     if (!board) return;
     
-    // Calculate costs for this board
+    /* Calculate costs for this board
     const aiCost = getBoardCost(BASE_COSTS.HIRE_AI, boardIndex);
     const hardDropCost = getBoardCost(BASE_COSTS.AI_HARD_DROP, boardIndex);
-    const speedCost = getBoardCost(BASE_COSTS.AI_SPEED, boardIndex);
+    const speedCost = getBoardCost(BASE_COSTS.AI_SPEED, boardIndex);*/
     
-    // Hire AI button
+    // Hire AI button - hidden until affordable
     const aiButton = document.createElement('button');
     aiButton.id = `ai-button-${boardIndex}`;
-    aiButton.textContent = `Hire AI (${aiCost} pts)`;
+    applyArcadeButtonStyle(aiButton, 'green');
     aiButton.style.display = 'none';
-    aiButton.style.width = '100%';
-    aiButton.style.padding = '10px';
-    aiButton.style.fontSize = '13px';
-    aiButton.style.fontWeight = 'bold';
-    aiButton.style.backgroundColor = '#4CAF50';
-    aiButton.style.color = 'white';
-    aiButton.style.border = 'none';
-    aiButton.style.borderRadius = '6px';
-    aiButton.style.cursor = 'pointer';
-    aiButton.style.transition = 'all 0.3s ease';
     
     aiButton.addEventListener('click', () => hireAI(boardIndex));
     
-    // AI Hard Drop button
+    // AI Hard Drop button - hidden until affordable
     const aiHardDropButton = document.createElement('button');
     aiHardDropButton.id = `ai-harddrop-button-${boardIndex}`;
-    aiHardDropButton.textContent = `AI Hard Drop (${hardDropCost} pts)`;
+    applyArcadeButtonStyle(aiHardDropButton, 'blue');
     aiHardDropButton.style.display = 'none';
-    aiHardDropButton.style.width = '100%';
-    aiHardDropButton.style.padding = '10px';
-    aiHardDropButton.style.fontSize = '13px';
-    aiHardDropButton.style.fontWeight = 'bold';
-    aiHardDropButton.style.backgroundColor = '#FF9800';
-    aiHardDropButton.style.color = 'white';
-    aiHardDropButton.style.border = 'none';
-    aiHardDropButton.style.borderRadius = '6px';
-    aiHardDropButton.style.cursor = 'pointer';
-    aiHardDropButton.style.transition = 'all 0.3s ease';
     
     aiHardDropButton.addEventListener('click', () => purchaseAIHardDrop(boardIndex));
     
-    // AI Speed button
+    // AI Speed button - hidden until affordable
     const aiSpeedButton = document.createElement('button');
     aiSpeedButton.id = `ai-speed-button-${boardIndex}`;
-    aiSpeedButton.textContent = `AI Speed Lv1 (${speedCost} pts)`;
+    applyArcadeButtonStyle(aiSpeedButton, 'orange');
     aiSpeedButton.style.display = 'none';
-    aiSpeedButton.style.width = '100%';
-    aiSpeedButton.style.padding = '10px';
-    aiSpeedButton.style.fontSize = '13px';
-    aiSpeedButton.style.fontWeight = 'bold';
-    aiSpeedButton.style.backgroundColor = '#00BCD4';
-    aiSpeedButton.style.color = 'white';
-    aiSpeedButton.style.border = 'none';
-    aiSpeedButton.style.borderRadius = '6px';
-    aiSpeedButton.style.cursor = 'pointer';
-    aiSpeedButton.style.transition = 'all 0.3s ease';
     
     aiSpeedButton.addEventListener('click', () => purchaseAISpeedUpgrade(boardIndex));
     
@@ -1466,42 +1564,20 @@ function createBoardUpgradeButtons(boardIndex: number): void {
     upgradesSection.appendChild(aiHardDropButton);
     upgradesSection.appendChild(aiSpeedButton);
     
-    // Force Next Piece unlock button (required for max-out, no AI required)
-    const forceNextPieceCost = getBoardCost(BASE_COSTS.FORCE_NEXT_PIECE_UNLOCK, boardIndex);
+    // Force Next Piece unlock button - hidden until affordable
     const forceNextPieceButton = document.createElement('button');
     forceNextPieceButton.id = `force-next-piece-button-${boardIndex}`;
-    forceNextPieceButton.textContent = `Force Piece (${forceNextPieceCost} pts)`;
+    applyArcadeButtonStyle(forceNextPieceButton, 'purple');
     forceNextPieceButton.style.display = 'none';
-    forceNextPieceButton.style.width = '100%';
-    forceNextPieceButton.style.padding = '10px';
-    forceNextPieceButton.style.fontSize = '13px';
-    forceNextPieceButton.style.fontWeight = 'bold';
-    forceNextPieceButton.style.backgroundColor = '#9C27B0';
-    forceNextPieceButton.style.color = 'white';
-    forceNextPieceButton.style.border = 'none';
-    forceNextPieceButton.style.borderRadius = '6px';
-    forceNextPieceButton.style.cursor = 'pointer';
-    forceNextPieceButton.style.transition = 'all 0.3s ease';
     
     forceNextPieceButton.addEventListener('click', () => purchaseForceNextPiece(boardIndex));
     upgradesSection.appendChild(forceNextPieceButton);
     
-    // Take Control button (pay-per-use, shows when AI is controlling active board)
-    const takeControlCost = getBoardCost(BASE_COSTS.TAKE_CONTROL, boardIndex);
+    // Take Control button - hidden until AI is active and affordable
     const takeControlButton = document.createElement('button');
     takeControlButton.id = `take-control-button-${boardIndex}`;
-    takeControlButton.textContent = `Take Control (${takeControlCost} pts)`;
+    applyArcadeButtonStyle(takeControlButton, 'gold');
     takeControlButton.style.display = 'none';
-    takeControlButton.style.width = '100%';
-    takeControlButton.style.padding = '10px';
-    takeControlButton.style.fontSize = '13px';
-    takeControlButton.style.fontWeight = 'bold';
-    takeControlButton.style.backgroundColor = '#E91E63';
-    takeControlButton.style.color = 'white';
-    takeControlButton.style.border = 'none';
-    takeControlButton.style.borderRadius = '6px';
-    takeControlButton.style.cursor = 'pointer';
-    takeControlButton.style.transition = 'all 0.3s ease';
     
     takeControlButton.addEventListener('click', () => activateTakeControl(boardIndex));
     upgradesSection.appendChild(takeControlButton);
@@ -1821,6 +1897,62 @@ function updatePrestigeButton(): void {
     }
 }
 
+// Updates the lock icons on mini board slots based on current game state
+function updateSlotLocks(): void {
+    for (let slotIndex = 0; slotIndex < 6; slotIndex++) {
+        const lockOverlay = document.getElementById(`slot-lock-${slotIndex}`);
+        if (!lockOverlay) continue;
+        
+        const boardForThisSlot = slotIndex; // Slot 0 holds board index 0, etc.
+        const board = boards[boardForThisSlot];
+        
+        // If this slot has a board in it, hide the lock completely
+        if (board && board.isMinified) {
+            lockOverlay.style.display = 'none';
+            continue;
+        }
+        
+        // Show the lock overlay
+        lockOverlay.style.display = 'flex';
+        
+        // Find lock icon and update its appearance based on unlock availability
+        const lockIcon = lockOverlay.querySelector('.lock-icon') as HTMLElement;
+        const boardLabel = lockOverlay.querySelector('.board-label') as HTMLElement;
+        const unlockCostEl = lockOverlay.querySelector('.unlock-cost') as HTMLElement;
+        
+        if (!lockIcon || !boardLabel || !unlockCostEl) continue;
+        
+        // Calculate which board needs to be maxed to unlock this slot
+        // Slot 0 (Board 2) unlocks when Board 1 (index 0) is maxed
+        // Slot 1 (Board 3) unlocks when Board 2 (index 1) is maxed, etc.
+        const requiredBoardIndex = slotIndex;
+        const requiredBoard = boards[requiredBoardIndex];
+        
+        // Check if the prerequisite board exists and is maxed out
+        const prerequisiteMet = requiredBoard && isBoardMaxedOut(requiredBoard);
+        
+        // Recalculate cost with prestige discount
+        const baseCost = BASE_COSTS.UNLOCK_NEXT_BOARD * Math.pow(COST_MULTIPLIER, slotIndex);
+        const reduction = 1 - (costReductionLevel * COST_REDUCTION_PER_LEVEL);
+        const cost = Math.round(baseCost * reduction);
+        unlockCostEl.textContent = `${cost} pts`;
+        
+        if (prerequisiteMet) {
+            // This slot is ready to be unlocked (previous board is maxed)
+            lockIcon.textContent = '🔓';
+            lockIcon.style.opacity = '1';
+            boardLabel.style.color = 'rgba(76, 175, 80, 0.9)'; // Green tint
+            unlockCostEl.style.color = 'rgba(76, 175, 80, 0.8)';
+        } else {
+            // Still locked (previous board not maxed yet)
+            lockIcon.textContent = '🔒';
+            lockIcon.style.opacity = '0.5';
+            boardLabel.style.color = 'rgba(255, 255, 255, 0.4)';
+            unlockCostEl.style.color = 'rgba(255, 255, 255, 0.3)';
+        }
+    }
+}
+
 function performPrestige(): void {
     if (!canPrestige()) return;
     
@@ -1857,15 +1989,57 @@ function resetForPrestige(): void {
     boards = [];
     activeBoardIndex = 0;
     
-    // Clear mini board slots
+    // Clear mini board slots (keep column visible, just clear contents)
     const miniBoardsColumn = document.getElementById('mini-boards-column');
     if (miniBoardsColumn) {
-        miniBoardsColumn.style.display = 'none';
+        // Don't hide the column - keep slots visible with locks
         for (let i = 0; i < 6; i++) {
             const slot = document.getElementById(`mini-board-slot-${i}`);
             if (slot) {
                 slot.innerHTML = '';
-                slot.style.backgroundColor = 'rgba(50, 50, 50, 0.5)';
+                slot.style.backgroundColor = 'rgba(30, 30, 30, 0.8)';
+                slot.style.border = '2px dashed rgba(100, 100, 100, 0.5)';
+                
+                // Recreate lock overlay
+                const lockOverlay = document.createElement('div');
+                lockOverlay.id = `slot-lock-${i}`;
+                lockOverlay.style.position = 'absolute';
+                lockOverlay.style.top = '0';
+                lockOverlay.style.left = '0';
+                lockOverlay.style.width = '100%';
+                lockOverlay.style.height = '100%';
+                lockOverlay.style.display = 'flex';
+                lockOverlay.style.flexDirection = 'column';
+                lockOverlay.style.justifyContent = 'center';
+                lockOverlay.style.alignItems = 'center';
+                lockOverlay.style.borderRadius = '6px';
+                
+                const lockIcon = document.createElement('div');
+                lockIcon.className = 'lock-icon';
+                lockIcon.textContent = '🔒';
+                lockIcon.style.fontSize = '24px';
+                lockIcon.style.marginBottom = '5px';
+                lockIcon.style.opacity = '0.6';
+                
+                const boardLabel = document.createElement('div');
+                boardLabel.className = 'board-label';
+                boardLabel.textContent = `Board ${i + 2}`;
+                boardLabel.style.fontSize = '10px';
+                boardLabel.style.color = 'rgba(255, 255, 255, 0.5)';
+                boardLabel.style.fontWeight = 'bold';
+                
+                const unlockCost = document.createElement('div');
+                unlockCost.className = 'unlock-cost';
+                const cost = Math.round(BASE_COSTS.UNLOCK_NEXT_BOARD * Math.pow(COST_MULTIPLIER, i));
+                unlockCost.textContent = `${cost} pts`;
+                unlockCost.style.fontSize = '9px';
+                unlockCost.style.color = 'rgba(255, 255, 255, 0.4)';
+                unlockCost.style.marginTop = '2px';
+                
+                lockOverlay.appendChild(lockIcon);
+                lockOverlay.appendChild(boardLabel);
+                lockOverlay.appendChild(unlockCost);
+                slot.appendChild(lockOverlay);
             }
         }
     }
@@ -2182,10 +2356,12 @@ function minifyBoard(board: Board): void {
     miniCanvas.style.borderRadius = '4px';
     board.canvas = miniCanvas;
     
-    // Clear slot and add canvas
+    // Clear slot (removes lock overlay) and add canvas
     slot.innerHTML = '';
     slot.appendChild(miniCanvas);
     slot.style.position = 'relative';
+    slot.style.border = 'none';  // Remove dashed border when board is placed
+    slot.style.backgroundColor = 'transparent';
     
     // Remove the old board container from active area
     const oldContainer = document.getElementById(`board-${board.index}-container`);
@@ -2257,6 +2433,7 @@ function updatePointsDisplay(): void {
         updateForceNextPieceUI(i);
     }
     updatePrestigeButton();
+    updateSlotLocks();
 }
 
 function updateGlobalHardDropButton(): void {
@@ -2266,12 +2443,16 @@ function updateGlobalHardDropButton(): void {
     if (hardDropUnlocked) {
         button.textContent = 'Hard Drop ✓';
         button.style.display = 'block';
-        button.style.backgroundColor = '#888888';
+        button.style.background = 'linear-gradient(180deg, #555566 0%, #333344 100%)';
+        button.style.color = '#00ff88';
+        button.style.boxShadow = '0 4px 0 #222233, 0 0 10px rgba(0, 255, 136, 0.3)';
         button.style.cursor = 'default';
         button.disabled = true;
     } else if (globalPoints >= BASE_COSTS.HARD_DROP) {
         button.style.display = 'block';
-        button.style.backgroundColor = '#2196F3';
+        button.style.background = 'linear-gradient(180deg, #00d4ff 0%, #0099cc 100%)';
+        button.style.color = '#000';
+        button.style.boxShadow = '0 4px 0 #007799, 0 0 15px rgba(0, 212, 255, 0.4)';
         button.style.cursor = 'pointer';
         button.disabled = false;
         showDialogue('global-harddrop', button);
@@ -2320,19 +2501,18 @@ function updateBoardButtons(boardIndex: number): void {
     if (aiButton) {
         if (board.aiHired) {
             aiButton.textContent = '🤖 AI Active';
-            aiButton.style.display = 'block';
-            aiButton.style.backgroundColor = '#888888';
-            aiButton.style.cursor = 'default';
+            applyArcadeButtonStyle(aiButton, 'disabled');
+            aiButton.style.color = '#00ff88';  // Green text for "completed"
             aiButton.disabled = true;
         } else if (globalPoints >= aiCost) {
             aiButton.style.display = 'block';
-            aiButton.style.backgroundColor = '#4CAF50';
-            aiButton.style.cursor = 'pointer';
-            aiButton.disabled = false;
+            applyArcadeButtonStyle(aiButton, 'green');
             aiButton.textContent = `Hire AI (${aiCost} pts)`;
+            aiButton.disabled = false;
         } else {
             aiButton.style.display = 'none';
         }
+    }
         // Trigger dialogue hints based on current state
     if (!board.aiHired && globalPoints >= aiCost) {
         const aiButton = document.getElementById(`ai-button-${boardIndex}`);
@@ -2353,7 +2533,7 @@ function updateBoardButtons(boardIndex: number): void {
         const unlockButton = document.getElementById('unlock-next-board-button');
         showDialogue('unlock-board', unlockButton);
     }
-    }
+    
     
     // AI Hard Drop Button
     const hardDropButton = document.getElementById(`ai-harddrop-button-${boardIndex}`) as HTMLButtonElement;
@@ -2711,15 +2891,57 @@ function resetGame(): void {
     boards = [];
     activeBoardIndex = 0;
     
-    // Clear mini board slots
+    // Clear mini board slots (keep column visible, just clear contents)
     const miniBoardsColumn = document.getElementById('mini-boards-column');
     if (miniBoardsColumn) {
-        miniBoardsColumn.style.display = 'none';
+        // Don't hide the column - keep slots visible with locks
         for (let i = 0; i < 6; i++) {
             const slot = document.getElementById(`mini-board-slot-${i}`);
             if (slot) {
                 slot.innerHTML = '';
-                slot.style.backgroundColor = 'rgba(50, 50, 50, 0.5)';
+                slot.style.backgroundColor = 'rgba(30, 30, 30, 0.8)';
+                slot.style.border = '2px dashed rgba(100, 100, 100, 0.5)';
+                
+                // Recreate lock overlay
+                const lockOverlay = document.createElement('div');
+                lockOverlay.id = `slot-lock-${i}`;
+                lockOverlay.style.position = 'absolute';
+                lockOverlay.style.top = '0';
+                lockOverlay.style.left = '0';
+                lockOverlay.style.width = '100%';
+                lockOverlay.style.height = '100%';
+                lockOverlay.style.display = 'flex';
+                lockOverlay.style.flexDirection = 'column';
+                lockOverlay.style.justifyContent = 'center';
+                lockOverlay.style.alignItems = 'center';
+                lockOverlay.style.borderRadius = '6px';
+                
+                const lockIcon = document.createElement('div');
+                lockIcon.className = 'lock-icon';
+                lockIcon.textContent = '🔒';
+                lockIcon.style.fontSize = '24px';
+                lockIcon.style.marginBottom = '5px';
+                lockIcon.style.opacity = '0.6';
+                
+                const boardLabel = document.createElement('div');
+                boardLabel.className = 'board-label';
+                boardLabel.textContent = `Board ${i + 2}`;
+                boardLabel.style.fontSize = '10px';
+                boardLabel.style.color = 'rgba(255, 255, 255, 0.5)';
+                boardLabel.style.fontWeight = 'bold';
+                
+                const unlockCost = document.createElement('div');
+                unlockCost.className = 'unlock-cost';
+                const cost = Math.round(BASE_COSTS.UNLOCK_NEXT_BOARD * Math.pow(COST_MULTIPLIER, i));
+                unlockCost.textContent = `${cost} pts`;
+                unlockCost.style.fontSize = '9px';
+                unlockCost.style.color = 'rgba(255, 255, 255, 0.4)';
+                unlockCost.style.marginTop = '2px';
+                
+                lockOverlay.appendChild(lockIcon);
+                lockOverlay.appendChild(boardLabel);
+                lockOverlay.appendChild(unlockCost);
+                slot.appendChild(lockOverlay);
             }
         }
     }
@@ -3181,15 +3403,57 @@ function resetGameSkipWelcome(): void {
     boards = [];
     activeBoardIndex = 0;
     
-    // Clear mini board slots
+    // Clear mini board slots (keep column visible, just clear contents)
     const miniBoardsColumn = document.getElementById('mini-boards-column');
     if (miniBoardsColumn) {
-        miniBoardsColumn.style.display = 'none';
+        // Don't hide the column - keep slots visible with locks
         for (let i = 0; i < 6; i++) {
             const slot = document.getElementById(`mini-board-slot-${i}`);
             if (slot) {
                 slot.innerHTML = '';
-                slot.style.backgroundColor = 'rgba(50, 50, 50, 0.5)';
+                slot.style.backgroundColor = 'rgba(30, 30, 30, 0.8)';
+                slot.style.border = '2px dashed rgba(100, 100, 100, 0.5)';
+                
+                // Recreate lock overlay
+                const lockOverlay = document.createElement('div');
+                lockOverlay.id = `slot-lock-${i}`;
+                lockOverlay.style.position = 'absolute';
+                lockOverlay.style.top = '0';
+                lockOverlay.style.left = '0';
+                lockOverlay.style.width = '100%';
+                lockOverlay.style.height = '100%';
+                lockOverlay.style.display = 'flex';
+                lockOverlay.style.flexDirection = 'column';
+                lockOverlay.style.justifyContent = 'center';
+                lockOverlay.style.alignItems = 'center';
+                lockOverlay.style.borderRadius = '6px';
+                
+                const lockIcon = document.createElement('div');
+                lockIcon.className = 'lock-icon';
+                lockIcon.textContent = '🔒';
+                lockIcon.style.fontSize = '24px';
+                lockIcon.style.marginBottom = '5px';
+                lockIcon.style.opacity = '0.6';
+                
+                const boardLabel = document.createElement('div');
+                boardLabel.className = 'board-label';
+                boardLabel.textContent = `Board ${i + 2}`;
+                boardLabel.style.fontSize = '10px';
+                boardLabel.style.color = 'rgba(255, 255, 255, 0.5)';
+                boardLabel.style.fontWeight = 'bold';
+                
+                const unlockCost = document.createElement('div');
+                unlockCost.className = 'unlock-cost';
+                const cost = Math.round(BASE_COSTS.UNLOCK_NEXT_BOARD * Math.pow(COST_MULTIPLIER, i));
+                unlockCost.textContent = `${cost} pts`;
+                unlockCost.style.fontSize = '9px';
+                unlockCost.style.color = 'rgba(255, 255, 255, 0.4)';
+                unlockCost.style.marginTop = '2px';
+                
+                lockOverlay.appendChild(lockIcon);
+                lockOverlay.appendChild(boardLabel);
+                lockOverlay.appendChild(unlockCost);
+                slot.appendChild(lockOverlay);
             }
         }
     }
@@ -3629,6 +3893,7 @@ createDialogueSystem();
 createGameOverScreen();
 updateStarsDisplay();
 updatePrestigeButton();
+updateSlotLocks();
 
 // Show welcome dialogue on first game start
 if (tutorialsEnabled) {

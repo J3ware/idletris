@@ -11,163 +11,462 @@
   <title>IDLETRIS</title>
 
   <style>
-    /* Reset default browser styles */
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
+    /* Import retro pixel font */
+    @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+    
+    /* =====================================================
+       CSS VARIABLES - Retro Arcade Dark Mode Palette
+       ===================================================== */
+    :root {
+        --bg-deep: #0a0a12;
+        --bg-panel: #2f3562;
+        --bg-panel-light: #252542;
+        --accent-orange: #ff9f43;
+        --accent-orange-glow: #ff6b00;
+        --accent-green: #00ff88;
+        --accent-green-dim: #00cc6a;
+        --accent-blue: #00d4ff;
+        --accent-purple: #bf5fff;
+        --accent-gold: #ffd700;
+        --text-primary: #e8e8e8;
+        --text-secondary: #888899;
+        --text-dim: #555566;
+        --border-glow: #2d2d44;
+        --danger: #ff4757;
     }
 
-/* Page background */
-body {
-  background: linear-gradient(180deg, #c2c2c2 0%, #151515 100%);
-  min-height: 100vh;
-  font-family: Arial, sans-serif;
-  color: white;
-  overflow-x: hidden;
-  overflow-y: auto;
-}
+    /* Reset default browser styles */
+    * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+    }
 
-/* When game wants to lock scrolling */
-body.noscroll {
-  overflow: hidden;
-}
+    /* Page background with deep dark color */
+    body {
+        background: var(--bg-deep);
+        min-height: 100vh;
+        font-family: Arial, sans-serif;
+        color: var(--text-primary);
+        overflow-x: hidden;
+        overflow-y: auto;
+        position: relative;
+    }
 
+    /* CRT Scanline overlay effect */
+    body::before {
+        content: "";
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        z-index: 9998;
+        background: repeating-linear-gradient(
+            0deg,
+            rgba(0, 0, 0, 0.15) 0px,
+            rgba(0, 0, 0, 0.15) 1px,
+            transparent 1px,
+            transparent 2px
+        );
+        opacity: 0.4;
+    }
+
+    /* Subtle screen flicker animation */
+    @keyframes flicker {
+        0% { opacity: 0.97; }
+        50% { opacity: 1; }
+        100% { opacity: 0.98; }
+    }
+
+    body::after {
+        content: "";
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        z-index: 9997;
+        background: radial-gradient(
+            ellipse at center,
+            transparent 0%,
+            rgba(0, 0, 0, 0.2) 90%,
+            rgba(0, 0, 0, 0.4) 100%
+        );
+        animation: flicker 0.15s infinite;
+    }
+
+    /* When game wants to lock scrolling */
+    body.noscroll {
+        overflow: hidden;
+    }
+
+    /* Retro font class for headers */
+    .retro-font {
+        font-family: 'Press Start 2P', cursive;
+    }
+
+    /* Neon glow text effects */
+    .glow-orange {
+        color: var(--accent-orange);
+        text-shadow: 0 0 10px var(--accent-orange), 0 0 20px var(--accent-orange-glow), 0 0 30px var(--accent-orange-glow);
+    }
+
+    .glow-green {
+        color: var(--accent-green);
+        text-shadow: 0 0 10px var(--accent-green), 0 0 20px var(--accent-green-dim), 0 0 30px var(--accent-green-dim);
+    }
+
+    .glow-blue {
+        color: var(--accent-blue);
+        text-shadow: 0 0 10px var(--accent-blue), 0 0 20px #0099cc, 0 0 30px #0099cc;
+    }
+
+    .glow-gold {
+        color: var(--accent-gold);
+        text-shadow: 0 0 10px var(--accent-gold), 0 0 20px #cc9900, 0 0 30px #cc9900;
+    }
 
     /* Main layout: left ad rail + game area */
     #layout {
-  max-width: 1400px;
-  margin: 140px auto 32px auto;         /* 140px to clear the header */
-  padding: 16px;
-  display: flex;
-  gap: 16px;
-  align-items: center;                  /* <<< center vertically */
-  justify-content: center;              /* center horizontally */
-  min-height: calc(100vh - 140px);      /* fill screen below header */
-}
-
+        max-width: 1400px;
+        margin: 140px auto 32px auto;
+        padding: 16px;
+        display: flex;
+        gap: 16px;
+        align-items: center;
+        justify-content: center;
+        min-height: calc(100vh - 140px);
+    }
 
     /* Left ad rail */
     #left-ad {
-  width: 300px;          /* ad width */
-  flex-shrink: 0;
-  min-height: 600px;     /* ad height */
-
-  display: flex;
-  justify-content: center;
-  align-items: center;
-
-}
+        width: 300px;
+        flex-shrink: 0;
+        min-height: 600px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        position: relative;
+    }
 
     /* Game area on the right */
     #game-area {
-  flex: 1;
-  display: flex;
-  justify-content: flex-start;  /* Change from center to flex-start */
-  align-items: flex-start;
-  padding-left: 20px;  /* Add some space from the ad */
-}
+        flex: 1;
+        display: flex;
+        justify-content: flex-start;
+        align-items: flex-start;
+        padding-left: 20px;
+    }
 
-    /* The canvas itself – size is still controlled in main.ts, this is just visuals */
+    /* The canvas itself */
     #game-canvas {
-      background: #000000;
-      border-radius: 12px;
-      max-width: 100%;
-      box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
+        background: #000000;
+        border-radius: 8px;
+        max-width: 100%;
+        box-shadow: 
+            0 0 20px rgba(0, 212, 255, 0.3),
+            0 0 40px rgba(0, 212, 255, 0.1),
+            inset 0 0 60px rgba(0, 0, 0, 0.5);
+        border: 2px solid var(--border-glow);
     }
 
     /* Stack on small screens */
     @media (max-width: 900px) {
-      #layout {
-        flex-direction: column;
-        align-items: center;
-        margin-top: 140px;
-      }
+        #layout {
+            flex-direction: column;
+            align-items: center;
+            margin-top: 140px;
+        }
 
-      #left-ad {
-        width: 100%;
-        min-height: auto;
-        margin-bottom: 12px;
-      }
+        #left-ad {
+            width: 100%;
+            min-height: auto;
+            margin-bottom: 12px;
+        }
+
+        #game-area {
+            padding-left: 0;
+        }
     }
+
+    /* Footer styles */
     #site-info {
-  max-width: 1400px;
-  margin: 40px auto 24px auto;
-  padding: 0 16px;
-  font-size: 13px;
-  text-align: center;
-  opacity: 0.65;
-  color: #f5f5f5;
-}
+        max-width: 1400px;
+        margin: 40px auto 24px auto;
+        padding: 0 16px;
+        font-size: 13px;
+        text-align: center;
+        opacity: 0.65;
+        color: var(--text-secondary);
+    }
 
-#footer-nav {
-  margin-bottom: 16px;
-}
+    #footer-nav {
+        margin-bottom: 16px;
+    }
 
-#footer-nav a {
-  color: #f5f5f5;
-  margin: 0 10px;
-  text-decoration: none;
-  font-size: 13px;
-  opacity: 0.8;
-}
+    #footer-nav a {
+        color: var(--text-secondary);
+        margin: 0 10px;
+        text-decoration: none;
+        font-size: 13px;
+        opacity: 0.8;
+        transition: all 0.2s ease;
+    }
 
-#footer-nav a:hover {
-  opacity: 1;
-  text-decoration: underline;
-}
+    #footer-nav a:hover {
+        opacity: 1;
+        color: var(--accent-orange);
+        text-decoration: underline;
+    }
 
-#site-info .footer-inner {
-  max-width: 700px;
-  margin: 0 auto;
-}
+    #site-info .footer-inner {
+        max-width: 700px;
+        margin: 0 auto;
+    }
 
-#site-info .footer-description {
-  margin-bottom: 10px;
-  line-height: 1.45;
-}
+    #site-info .footer-description {
+        margin-bottom: 10px;
+        line-height: 1.45;
+    }
 
-#site-info .footer-meta {
-  font-size: 12px;
-  opacity: 0.75;
-}
-a:link {
-  color: rgb(164, 164, 164);
-}
+    #site-info .footer-meta {
+        font-size: 12px;
+        opacity: 0.75;
+    }
 
-a:visited {
-  color: rgb(208, 112, 208);
-}
+    a:link {
+        color: var(--text-secondary);
+    }
 
-a:hover {
-  color: rgb(230, 148, 148);
-}
+    a:visited {
+        color: var(--accent-purple);
+    }
 
-a:active {
-  color: orange;
-}
+    a:hover {
+        color: var(--accent-orange);
+    }
 
-  </style>
+    a:active {
+        color: var(--accent-gold);
+    }
+
+    /* ---------- Modal overlay for Privacy / Terms ---------- */
+    .modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.85);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+    }
+
+    .modal-overlay.active {
+        display: flex;
+    }
+
+    .modal-content {
+        background: var(--bg-panel);
+        border-radius: 10px;
+        border: 2px solid var(--border-glow);
+        max-width: 600px;
+        width: 90vw;
+        max-height: 50vh;
+        padding-top: 40px;
+        position: relative;
+        box-shadow: 0 0 30px rgba(0, 212, 255, 0.2);
+        overflow: hidden;
+    }
+
+    .modal-close {
+        position: absolute;
+        top: 8px;
+        right: 12px;
+        border: none;
+        background: transparent;
+        color: var(--text-primary);
+        font-size: 22px;
+        cursor: pointer;
+        transition: color 0.2s ease;
+    }
+
+    .modal-close:hover {
+        color: var(--accent-orange);
+    }
+
+    .modal-iframe {
+        border: none;
+        width: 100%;
+        height: calc(90vh - 40px);
+        background: #ffffff;
+    }
+
+    /* =====================================================
+       ARCADE BUTTON STYLES
+       ===================================================== */
+    .arcade-btn {
+        font-family: 'Press Start 2P', cursive;
+        font-size: 10px;
+        padding: 12px 20px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        text-transform: uppercase;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .arcade-btn::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+        transition: left 0.4s ease;
+    }
+
+    .arcade-btn:hover::before {
+        left: 100%;
+    }
+
+    .arcade-btn-green {
+        background: linear-gradient(180deg, #00ff88 0%, #00cc6a 100%);
+        color: #000;
+        box-shadow: 0 4px 0 #009950, 0 0 15px rgba(0, 255, 136, 0.4);
+    }
+
+    .arcade-btn-green:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 0 #009950, 0 0 25px rgba(0, 255, 136, 0.6);
+    }
+
+    .arcade-btn-green:active {
+        transform: translateY(2px);
+        box-shadow: 0 2px 0 #009950, 0 0 10px rgba(0, 255, 136, 0.4);
+    }
+
+    .arcade-btn-orange {
+        background: linear-gradient(180deg, #ff9f43 0%, #ff6b00 100%);
+        color: #000;
+        box-shadow: 0 4px 0 #cc5500, 0 0 15px rgba(255, 159, 67, 0.4);
+    }
+
+    .arcade-btn-orange:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 0 #cc5500, 0 0 25px rgba(255, 159, 67, 0.6);
+    }
+
+    .arcade-btn-blue {
+        background: linear-gradient(180deg, #00d4ff 0%, #0099cc 100%);
+        color: #000;
+        box-shadow: 0 4px 0 #007799, 0 0 15px rgba(0, 212, 255, 0.4);
+    }
+
+    .arcade-btn-blue:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 0 #007799, 0 0 25px rgba(0, 212, 255, 0.6);
+    }
+
+    .arcade-btn-gold {
+        background: linear-gradient(180deg, #ffd700 0%, #cc9900 100%);
+        color: #000;
+        box-shadow: 0 4px 0 #997700, 0 0 15px rgba(255, 215, 0, 0.4);
+    }
+
+    .arcade-btn-gold:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 0 #997700, 0 0 25px rgba(255, 215, 0, 0.6);
+    }
+
+    .arcade-btn-purple {
+        background: linear-gradient(180deg, #bf5fff 0%, #9932cc 100%);
+        color: #fff;
+        box-shadow: 0 4px 0 #7722aa, 0 0 15px rgba(191, 95, 255, 0.4);
+    }
+
+    .arcade-btn-purple:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 0 #7722aa, 0 0 25px rgba(191, 95, 255, 0.6);
+    }
+
+    .arcade-btn-disabled {
+        background: linear-gradient(180deg, #555566 0%, #333344 100%);
+        color: #888;
+        box-shadow: 0 4px 0 #222233;
+        cursor: not-allowed;
+    }
+
+    .arcade-btn-disabled:hover {
+        transform: none;
+        box-shadow: 0 4px 0 #222233;
+    }
+
+    .arcade-btn-disabled::before {
+        display: none;
+    }
+</style>
 </head>
 <body>
+  <!-- Hidden SVG logo for reuse -->
+<svg id="idletris-logo-svg" style="display: none;" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080">
+    <defs>
+        <style>
+            .logo-fill { fill: #ff9f43; }
+            .logo-fill-dark { fill: #1a1a2e; }
+        </style>
+    </defs>
+    <path class="logo-fill" d="M1472,28v1024H448V28h1024ZM1119,311c-2.16,0-.65-39.91-3.52-42.98l-27.01-7.99-13.04-26.03c-1.17-5.6,15.81-20.85,10.03-29.96-2.85-4.5-21.04-21.9-25.92-26.07-1.24-1.06-5.15-4.44-6.25-4.77-6.66-2.01-20.76,9.71-26.93,12.6-6.77-5.07-24.3-7.59-29.71-11.93-4.71-3.77-6.15-25.24-10.63-27.37-1.24-.59-2.22-.43-3.44-.56-4.51-.45-40.66-.4-42.57.54-5.24,5.81-5.32,21.33-10.44,26.56-4.29,4.38-22.45,7.05-28.29,11.8-8.35,1.44-23.61-17.8-32.27-9.36-4.6,6.95-28.73,25.38-30.57,31.49-1.96,6.48,9.85,20.02,12.43,26.35l-13.1,27.42c-4.95,2.29-24.85,4.45-27.21,8.3-.79,1.3-1.36,4.8-1.53,6.47-1.1,11.05.12,24.17-1.01,35.49h-90.5c-.18,0-2.5,2.32-2.5,2.5v58l1.5,1.5h116c1.88,0,1.88,5,0,5h-57l-1.5,1.5v60l1.5,1.5h138.5c1.26,1.7.42,6-1.5,6h-54.5v63h209v-63h-51.5c-.26,0-2.73-2.34-2.42-3.36.09-.53,2.24-2.64,2.42-2.64h136.5v-63h-56.5c-1.88,0-1.88-5,0,5h115l1.5-1.5v-58c0-.33-1.32-1.52-1-2.5h-92ZM768,378h-149v63h149v-63ZM1309.06,378h-150.06v63h150.06v-63ZM618.56,447v63h70.44v-63h-70.44ZM694.91,447v63h156.09v-63h-156.09ZM1074,447v63h158v-63h-158ZM1309.05,447h-70.05v63h70.05v-63ZM768,515h-221v65h221v-65ZM960,515h-186v65h186v-65ZM1152.66,515h-186.66v65h186.66v-65ZM1346,515h-187v65h187v-65ZM1340,679h37.5c2.95,0,4.96-15.71,5.33-18.67,2.11-16.69,3.47-31.26-10.82-42.85-20.49-16.62-65.85-12.02-85.93,4.1-20.81,16.71-25.96,58.81-12.28,81.11,10.02,16.33,44.03,35.66,48.66,49.34,4.64,13.71-2.84,32.35-19.06,32.88-14.06.46-15.34-10.13-14.4-21.39.35-4.17,3.17-11.7,2.93-15.12-.06-.92-.83-2.4-1.45-2.4h-36c-4.57,0-5.82,12.25-6.33,15.67-5.52,36.47,1.96,57.02,42.34,59.32,43.11,2.45,74.78-15.82,77.53-61.44,1.75-28.9-13.42-39.81-32.03-58.05-7.88-7.73-24.74-18.89-26.02-29.98-1.86-16.22,6.19-30.37,24.29-26.29,15.16,3.42,2.73,31.89,5.71,33.79Z"/>
+    <g>
+        <path d="M1120.5,817c-.86-.24-2.44-2.4-2.44-3.56l-8.05-72.45-15.36,1.16-1.5,1.49-13.65,73.35h-42l-1.39-1.66,36.1-203.12c1.56-1.06,3.43-1.13,5.25-1.26,19.23-1.42,74.31-1.95,90.22,5.87,26.53,13.04,19.91,48.4,14.64,71.99-3.84,17.21-7.66,30.77-23.01,40.99-2.89,1.92-9.88,3.96-10.35,6.73l12.89,78.81-1.35,1.66h-40ZM1099,711h14.5c2.12,0,10.67-2.08,12.89-3.11,11.85-5.48,15.94-25.56,16.65-37.35.53-8.8,1.23-18.72-9.63-20.45-3.58-.57-20.27-1.24-22.73.1-.7.38-1.38.53-1.51,1.49l-10.18,59.32Z"/>
+        <path d="M610.23,613.24c1.54-1.11,3.41-1.15,5.22-1.28,14.74-1.07,36.19-.79,51.08,0,52.98,2.81,55.97,31.97,49.17,77.25-3.67,24.45-11.1,77.33-22.91,97.09-24.78,41.49-78.5,30.21-119.16,31.55l-1.55-1.5c12.58-67.62,23.19-135.93,38.14-203.11ZM623.01,780c4.99-1.8,10.25-.52,15.39-1.1,21.49-2.46,22.84-26.9,26.29-43.71s13.02-57.82,11.32-72.69c-1.82-15.9-18.45-11.09-30.07-11.07l-22.92,128.57Z"/>
+        <path d="M1340,679c-2.98-1.9,9.45-30.37-5.71-33.79-18.1-4.08-26.15,10.07-24.29,26.29,1.27,11.09,18.13,22.25,26.02,29.98,18.61,18.24,33.77,29.15,32.03,58.05-2.76,45.63-34.42,63.9-77.53,61.44-40.38-2.3-47.86-22.85-42.34-59.32.52-3.41,1.76-15.67,6.33-15.67h36c.62,0,1.38,1.48,1.45,2.4.24,3.42-2.58,10.95-2.93,15.12-.94,11.26.33,21.85,14.4,21.39,16.22-.53,23.7-19.17,19.06-32.88-4.63-13.67-38.64-33-48.66-49.34-13.68-22.3-8.54-64.4,12.28-81.11,20.08-16.12,65.44-20.71,85.93-4.1,14.29,11.59,12.94,26.16,10.82,42.85-.37,2.96-2.38,18.67-5.33,18.67h-37.5Z"/>
+        <path d="M937.5,612l1.31,2.26-7.45,34.83-45.92,1.85-7.44,44.06h41.5c.36,0,1.61,1.05,2.37,1.14l-7.26,35.96-43.46,1.03-9.11,45.38,50.85,1.61-7.02,36.74-93.4.19c-.86-1.33-.49-2.97-.37-4.42,1.21-14.31,6.89-33.64,9.61-48.43,9.04-49.12,17.43-98.36,26.54-147.46.03-1.21,2.62-4.75,3.25-4.75h86Z"/>
+        <path d="M1057.5,612l1.31,2.26c-2.67,5.33-4.67,32.16-7.29,34.76s-26.19-.01-31.42,1.08l-29.61,167.89h-41c-.35,0-1.19-1.12-1.36-1.66l29.86-166.34h-30.5c-.36,0-1.61-1.03-2.35-1.16-.86-1.43,4.28-29.12,5.3-32.89.4-1.48.78-2.93,2.05-3.95h105Z"/>
+        <path d="M761,779h39.5c.36,0,1.61,1.03,2.34,1.16.49,1.37.19,2.81.05,4.2-.57,5.61-4.03,25.51-5.89,30.14-.52,1.29-.75,2.29-2.27,2.79-19.09-.22-38.22-.42-57.3-.32-5.95.03-17.7,1.75-22.85.92-1.51-.24-4.03-.9-4.48-2.55l37.39-203.34h40c.14,0,1.84,1.6,2.04,2.03l-28.54,164.97Z"/>
+        <path d="M1255.5,611c.54.09,1.56,1,2.34,1.16l-35.12,200.06-2.22,4.78h-41c-.77,0-1.91-2.29-1.45-3.35,13.01-62.93,21.09-126.96,34.26-189.84.67-3.18,1.33-12.81,5.19-12.81,11.45,1.36,27.11-1.83,38,0Z"/>
+        <path d="M550,818h-41.5c-.35,0-1.19-1.12-1.36-1.66l36.86-203.34h41.5c.61,0,1.39,1.48,1.45,2.4.16,2.47-1.74,10.54-2.26,13.79-10.09,63.13-23.57,125.87-34.69,188.81Z"/>
+        <path class="logo-fill" d="M1099,711l10.18-59.32c.13-.96.81-1.11,1.51-1.49,2.46-1.34,19.15-.67,22.73-.1,10.86,1.73,10.16,11.65,9.63,20.45-.71,11.79-4.81,31.87-16.65,37.35-2.22,1.03-10.77,3.11-12.89,3.11h-14.5Z"/>
+        <path class="logo-fill" d="M623.01,780l22.92-128.57c11.62-.02,28.25-4.83,30.07,11.07,1.7,14.87-7.88,56.01-11.32,72.69s-4.81,41.25-26.29,43.71c-5.14.59-10.4-.7-15.39,1.1Z"/>
+        <rect x="547" y="515" width="221" height="65"/>
+        <rect x="1159" y="515" width="187" height="65"/>
+        <rect x="966" y="515" width="186.66" height="65"/>
+        <rect x="774" y="515" width="186" height="65"/>
+        <path d="M1119,311h92c-.32.98,1,2.17,1,2.5v58l-1.5,1.5h-115c-1.88,0-1.88,5,0,5h56.5v63h-136.5c-.18,0-2.32,2.11-2.42,2.64-.31,1.03,2.16,3.36,2.42,3.36h51.5v63h-209v-63h54.5c1.92,0,2.76-4.3,1.5-6h-138.5l-1.5-1.5v-60l1.5-1.5h57c1.88,0,1.88-5,0-5h-116l-1.5-1.5v-58c0-.18,2.32-2.5,2.5-2.5h90.5c1.13-11.32-.09-24.43,1.01-35.49.17-1.67.73-5.18,1.53-6.47,2.35-3.84,22.25-6,27.21-8.3l13.1-27.42c-2.59-6.33-14.39-19.88-12.43-26.35,1.85-6.11,25.98-24.54,30.57-31.49,8.66-8.44,23.92,10.8,32.27,9.36,5.84-4.75,24-7.42,28.29-11.8,5.12-5.23,5.21-20.75,10.44-26.56,1.91-.94,38.06-.99,42.57-.54,1.22.12,2.21-.03,3.44.56,4.48,2.13,5.93,23.6,10.63,27.37,5.41,4.33,22.94,6.86,29.71,11.93,6.17-2.89,20.27-14.6,26.93-12.6,1.1.33,5.01,3.72,6.25,4.77,4.88,4.17,23.07,21.57,25.92,26.07,5.78,9.12-11.2,24.36-10.03,29.96l13.04,26.03,27.01,7.99c2.87,3.07,1.36,42.98,3.52,42.98ZM1065.35,304.9c0-56.23-45.59-101.82-101.82-101.82s-101.82,45.59-101.82,101.82,45.59,101.82,101.82,101.82,101.82-45.59,101.82-101.82Z"/>
+        <rect x="1074" y="447" width="158" height="63"/>
+        <rect x="694.91" y="447" width="156.09" height="63"/>
+        <rect x="1159" y="378" width="150.06" height="63"/>
+        <rect x="619" y="378" width="149" height="63"/>
+        <rect x="618.56" y="447" width="70.44" height="63"/>
+        <rect x="1239" y="447" width="70.05" height="63"/>
+        <path class="logo-fill" d="M1065.35,304.9c0,56.23-45.59,101.82-101.82,101.82s-101.82-45.59-101.82-101.82,45.59-101.82,101.82-101.82,101.82,45.59,101.82,101.82ZM1050.42,304.96c0-47.91-38.84-86.74-86.74-86.74s-86.74,38.84-86.74,86.74,38.84,86.74,86.74,86.74,86.74-38.84,86.74-86.74Z"/>
+        <path d="M1050.42,304.96c0,47.91-38.84,86.74-86.74,86.74s-86.74-38.84-86.74-86.74,38.84-86.74,86.74-86.74,86.74,38.84,86.74,86.74ZM956,234c-33.29,3.8-59.2,30.91-63,64h23v15h-23c3.44,33.39,29.68,59.48,63,63v-26.5c3.22-2.42,11.67-2.45,15,0v25c1.29,1.92,5.03.64,7.23.22,28.19-5.4,54.62-32.47,55.77-61.72h-21.5c-3.11-3.76-.84-10.26-1.5-15h23c-2.09-32.73-30.13-61.43-63-64v28c-4.74-.66-11.24,1.61-15-1.5v-26.5Z"/>
+        <path class="logo-fill" d="M956,234v26.5c3.76,3.11,10.26.84,15,1.5v-28c32.87,2.57,60.91,31.27,63,64h-23c.66,4.74-1.61,11.24,1.5,15h21.5c-1.15,29.25-27.58,56.32-55.77,61.72-2.2.42-5.93,1.7-7.23-.22v-25c-3.33-2.45-11.78-2.42-15,0v26.5c-33.32-3.52-59.56-29.61-63-63h23v-15h-23c3.8-33.09,29.71-60.2,63-64ZM925.69,264.16l-12.22,8.82.27,1.69,31.35,31.83c.57,10.17,5.02,18.21,15.81,19.88,7.39,1.14,16.36-4.33,18.43-11.56,1.13-3.96-.21-8.15,1.62-11.38l34.98-32.08-8.63-7.26h-1.59s-33.18,29.9-33.18,29.9c-5.69-3.72-10.3-3.56-16.56-1.51l-30.28-28.34Z"/>
+        <path d="M925.69,264.16l30.28,28.34c6.25-2.05,10.87-2.21,16.56,1.51l33.18-29.9h1.59s8.63,7.26,8.63,7.26l-34.98,32.08c-1.83,3.23-.49,7.41-1.62,11.38-2.07,7.23-11.04,12.71-18.43,11.56-10.79-1.67-15.25-9.71-15.81-19.88l-31.35-31.83-.27-1.69,12.22-8.82Z"/>
+    </g>
+</svg>
   <!-- Your script creates the fixed global header at the top -->
 
   <div id="layout">
     <!-- Left 300×600 ad rail -->
     <div id="left-ad">
-  <div style="position:absolute; font-size:14px; color:red; top:8px; left:8px;">
-    AD SLOT (300×600)
-  </div>
+      <div style="position:absolute; font-size:14px; color:red; top:8px; left:8px;">
+        &nbsp;
+      </div>
 
-  <ins class="adsbygoogle"
-     style="display:inline-block;width:300px;height:600px"
-     data-ad-client="ca-pub-4757245543517381"
-     data-ad-slot="1802489685"></ins>
-<script>
-     (adsbygoogle = window.adsbygoogle || []).push({});
-</script>
-</div>
-
+      <ins class="adsbygoogle"
+           style="display:inline-block;width:300px;height:600px"
+           data-ad-client="ca-pub-4757245543517381"
+           data-ad-slot="1802489685"></ins>
+      <script>
+        (adsbygoogle = window.adsbygoogle || []).push({});
+      </script>
+    </div>
 
     <!-- Game area: your TS moves the canvas into its own container here -->
     <div id="game-area">
@@ -175,31 +474,101 @@ a:active {
     </div>
   </div>
 
-<footer id="site-info">
-<nav id="footer-nav">
-    <a href="/privacy.html">Privacy</a> - 
-    <a href="/terms.html">Terms</a> - 
-    <a href="mailto:idletris@j3ware.com?subject=Contacting%20through%20Idletris.com">Contact</a>
-  </nav>
+  <footer id="site-info">
+    <nav id="footer-nav">
+      <a href="privacy.html" data-modal="legal">Privacy</a> - 
+      <a href="terms.html" data-modal="legal">Terms</a> - 
+      <a href="mailto:idletris@j3ware.com?subject=Contacting%20through%20Idletris.com">
+        Contact
+      </a>
+    </nav>
 
-  <div class="footer-inner" id="about">
-    <p class="footer-description">
-      About the game: Idletris is a browser-based incremental falling-block puzzle experience created by J3 Software LLC.
-      Players guide descending pieces, clear lines to earn points, unlock automated helpers, and build
-      long-term strategies through progressive upgrades. Idletris is designed for quick, session-friendly
-      desktop play and supports continued development through advertising.
-    </p>
-    <p class="footer-meta">
-      © <span id="footer-year"></span> J3 Software LLC · All rights reserved.
-    </p>
+    <div class="footer-inner" id="about">
+      <p class="footer-description">
+        About the game: Idletris is a browser-based incremental falling-block puzzle experience created by J3 Software LLC.
+        Players guide descending pieces, clear lines to earn points, unlock automated helpers, and build
+        long-term strategies through progressive upgrades. Idletris is designed for quick, session-friendly
+        desktop play and supports continued development through advertising.
+      </p>
+      <p class="footer-meta">
+        © <span id="footer-year"></span> J3 Software LLC · All rights reserved.
+      </p>
+    </div>
+  </footer>
+
+  <!-- Modal HTML -->
+  <div id="legal-modal" class="modal-overlay">
+    <div class="modal-content">
+      <button class="modal-close" aria-label="Close legal window">×</button>
+      <iframe
+        id="legal-frame"
+        class="modal-iframe"
+        src=""
+        title="Legal document"
+      ></iframe>
+    </div>
   </div>
-</footer>
 
-<script>
-  document.getElementById("footer-year").textContent = new Date().getFullYear();
-</script>
+  <!-- Scripts -->
+  <script>
+    // Footer year
+    (function () {
+      const yearSpan = document.getElementById("footer-year");
+      if (yearSpan) {
+        yearSpan.textContent = new Date().getFullYear();
+      }
+    })();
 
-  <!-- Your Vite entry; Vite will rewrite this path on build -->
-  <script type="module" src="/src/main.ts"></script>
+    // ----- Modal behavior -----
+    (function () {
+      const modal = document.getElementById("legal-modal");
+      const iframe = document.getElementById("legal-frame");
+      const closeBtn = modal ? modal.querySelector(".modal-close") : null;
+
+      if (!modal || !iframe || !closeBtn) {
+        // If something is missing, do nothing rather than crash
+        return;
+      }
+
+      // Open modal for any footer link with data-modal="legal"
+      document
+        .querySelectorAll('#footer-nav a[data-modal="legal"]')
+        .forEach(link => {
+          link.addEventListener("click", function (e) {
+            e.preventDefault(); // stay on the page
+            const url = this.getAttribute("href");
+            if (!url) return;
+            iframe.src = url;   // load privacy.html / terms.html
+            modal.classList.add("active");
+            document.body.classList.add("noscroll");
+          });
+        });
+
+      function closeModal() {
+        modal.classList.remove("active");
+        document.body.classList.remove("noscroll");
+        iframe.src = ""; // optional: clear out content when closing
+      }
+
+      closeBtn.addEventListener("click", closeModal);
+
+      // Close when clicking outside content
+      modal.addEventListener("click", function (e) {
+        if (e.target === modal) {
+          closeModal();
+        }
+      });
+
+      // Close on Escape key
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape" && modal.classList.contains("active")) {
+          closeModal();
+        }
+      });
+    })();
+  </script>
+
+  <!-- Your Vite-built bundle (keep this as whatever Vite actually outputs) -->
+  <script type="module" crossorigin src="src/main.ts"></script>
 </body>
 </html>
