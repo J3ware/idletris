@@ -47,12 +47,12 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 // Base costs for Board 1 (index 0)
 const BASE_COSTS = {
     HARD_DROP: 1,                  // Global hard drop unlock
-    HIRE_AI: 5,                    // Hire AI for a board
+    HIRE_AI: 2,                    // Hire AI for a board
     AI_HARD_DROP: 10,               // AI hard drop upgrade
-    AI_SPEED: 5,                  // Per speed level (5 levels total)
+    AI_SPEED: 3,                  // Per speed level (5 levels total)
     UNLOCK_NEXT_BOARD: 15,         // Cost to unlock board 2
     RESET_BOARD: 5,               // Cost to reset board 1 after loss
-    FORCE_NEXT_PIECE_UNLOCK: 5,   // Unlock force next piece feature
+    FORCE_NEXT_PIECE_UNLOCK: 4,   // Unlock force next piece feature
     FORCE_NEXT_PIECE_USE: 1,       // Cost per use
     TAKE_CONTROL: 5,              // Cost to pause AI and take control for 30 pieces
 };
@@ -66,24 +66,26 @@ const COST_MULTIPLIER = 2;
 
 // Calculate the cost of an upgrade for a specific board
 function getBoardCost(baseCost: number, boardIndex: number): number {
-    // Apply board tier scaling (1.5x per board)
+    // Apply board tier scaling (2x per board)
     const tieredCost = baseCost * Math.pow(COST_MULTIPLIER, boardIndex);
-    // Apply prestige cost reduction (5% per level)
-    const reduction = 1 - (costReductionLevel * COST_REDUCTION_PER_LEVEL);
+    // Apply prestige 50% cost reduction if purchased
+    const reduction = hasHalfCost ? 0.5 : 1;
     return Math.round(tieredCost * reduction);
 }
 
 // Calculate the cost to reset a specific board after it loses
 function getResetCost(boardIndex: number): number {
     const tieredCost = BASE_COSTS.RESET_BOARD * Math.pow(COST_MULTIPLIER, boardIndex);
-    const reduction = 1 - (costReductionLevel * COST_REDUCTION_PER_LEVEL);
+    // Apply prestige 50% cost reduction if purchased
+    const reduction = hasHalfCost ? 0.5 : 1;
     return Math.round(tieredCost * reduction);
 }
 
 // Calculate the cost to unlock the next board
 function getNextBoardUnlockCost(currentBoardCount: number): number {
     const tieredCost = BASE_COSTS.UNLOCK_NEXT_BOARD * Math.pow(COST_MULTIPLIER, currentBoardCount - 1);
-    const reduction = 1 - (costReductionLevel * COST_REDUCTION_PER_LEVEL);
+    // Apply prestige 50% cost reduction if purchased
+    const reduction = hasHalfCost ? 0.5 : 1;
     return Math.round(tieredCost * reduction);
 }
 
@@ -214,12 +216,10 @@ let tutorialsEnabled: boolean = true;
 // =====================================================
 let prestigeCount: number = 0;           // How many times player has prestiged
 let prestigeStars: number = 0;           // Spendable prestige currency
-let costReductionLevel: number = 0;      // 0-10, each level = 5% reduction
-let pointsMultiplierLevel: number = 0;   // 0-10, each level = 0.1x bonus
+let hasDoublePoints: boolean = false;    // 2x points permanently
+let hasHalfCost: boolean = false;        // 50% cost reduction permanently
+let hasAutoReset: boolean = false;       // Auto-reset mini boards when they lose
 
-const MAX_PRESTIGE_UPGRADE_LEVEL = 4;
-const COST_REDUCTION_PER_LEVEL = 0.2;   // 20% per level
-const POINTS_MULTIPLIER_PER_LEVEL = 2; // 2x per level
 const SCORE_PER_STAR = 5000;             // 5000 score (lines) = 1 star
 
 const DIALOGUE_CONTENT: { [key: string]: { title: string; description: string } } = {
@@ -250,6 +250,14 @@ const DIALOGUE_CONTENT: { [key: string]: { title: string; description: string } 
     'force-next-piece': {
         title: 'Unlock Force Next Piece',
         description: 'Once unlocked, spend points to change the upcoming piece to whichever shape you want.'
+    },
+    'take-control': {
+        title: 'Take Control',
+        description: 'Temporarily pause the AI and take manual control for 30 pieces. Perfect for tricky situations or when you want to optimize piece placement yourself!'
+    },
+    'prestige': {
+        title: 'Prestige Available!',
+        description: 'You\'ve maxed out all 7 boards! Prestige to earn stars based on your score. Stars can be spent on permanent upgrades in the Prestige Shop that persist across runs.'
     },
 };
 
@@ -505,7 +513,6 @@ function lockPiece(board: Board): void {
         // If counter hits 0, re-enable AI
         if (board.playerControlPiecesRemaining === 0) {
             board.aiEnabled = true;
-            updateBoardStatus(board.index);
             console.log(`Board ${board.index + 1}: AI resumed control`);
         }
     }
@@ -534,8 +541,8 @@ function clearLines(board: Board): number {
     
     if (linesCleared > 0) {
         globalLinesCleared += linesCleared;
-        // Apply prestige points multiplier (1.0x base + 0.1x per level)
-        const multiplier = 1 + (pointsMultiplierLevel * POINTS_MULTIPLIER_PER_LEVEL);
+        // Apply prestige 2x points multiplier if purchased
+        const multiplier = hasDoublePoints ? 2 : 1;
         const pointsEarned = Math.round(linesCleared * multiplier);
         globalPoints += pointsEarned;
         updatePointsDisplay();
@@ -578,8 +585,14 @@ function handleBoardGameOver(board: Board): void {
         isGameOver = true;
         showGameOverScreen();
     } else {
-        // A minified AI board lost - show reset overlay
-        showBoardLostOverlay(board);
+        // A minified AI board lost
+        if (hasAutoReset) {
+            // Auto-reset the board immediately (free reset from prestige upgrade)
+            autoResetBoard(board.index);
+        } else {
+            // Show reset overlay for manual reset
+            showBoardLostOverlay(board);
+        }
     }
 }
 
@@ -1010,19 +1023,27 @@ function createGlobalHeader(): void {
         </div>
     `;
     
-    // Controls section
+    // Controls section - retro arcade style
     const controlsSection = document.createElement('div');
     controlsSection.id = 'global-controls-section';
     controlsSection.style.textAlign = 'center';
-    controlsSection.style.padding = '15px 25px';
-    controlsSection.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
-    controlsSection.style.borderRadius = '10px';
-    controlsSection.style.fontSize = '12px';
-    controlsSection.style.color = '#aaa';
+    controlsSection.style.padding = '12px 20px';
+    controlsSection.style.backgroundColor = 'rgba(0, 0, 0, 0.4)';
+    controlsSection.style.borderRadius = '8px';
+    controlsSection.style.border = '1px solid rgba(255, 255, 255, 0.1)';
+    controlsSection.style.boxShadow = 'inset 0 0 20px rgba(0, 0, 0, 0.5)';
     controlsSection.innerHTML = `
-        <div style="margin-bottom: 8px; font-weight: bold; color: #fff;">Controls</div>
-        <div>← → : Move | ↑ : Rotate</div>
-        <div>↓ : Soft Drop | <span id="space-control-text" style="opacity: 0.5;">Space : Locked</span></div>
+        <div style="margin-bottom: 10px; font-family: 'Press Start 2P', cursive; font-size: 10px; color: #00ff88; text-shadow: 0 0 10px rgba(0, 255, 136, 0.5);">CONTROLS</div>
+        <div style="font-family: 'Press Start 2P', cursive; font-size: 8px; color: #aaa; margin-bottom: 6px; line-height: 1.8;">
+            <span style="color: #00d4ff;">←</span> <span style="color: #00d4ff;">→</span> MOVE 
+            <span style="color: #444; margin: 0 6px;">|</span> 
+            <span style="color: #00d4ff;">↑</span> ROTATE
+        </div>
+        <div style="font-family: 'Press Start 2P', cursive; font-size: 8px; color: #aaa; line-height: 1.8;">
+            <span style="color: #00d4ff;">↓</span> DROP 
+            <span style="color: #444; margin: 0 6px;">|</span> 
+            <span id="space-control-text" style="color: #666;">SPACE: LOCKED</span>
+        </div>
     `;
     
     // Global upgrades section
@@ -1036,19 +1057,22 @@ function createGlobalHeader(): void {
     header.appendChild(pointsSection);
     header.appendChild(scoreSection);
     
-    // Prestige stars section (only visible after first prestige)
+    // Prestige stars section - gold glow style (only visible after first prestige)
     const starsSection = document.createElement('div');
     starsSection.id = 'stars-section';
     starsSection.style.textAlign = 'center';
-    starsSection.style.padding = '15px 30px';
-    starsSection.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
-    starsSection.style.borderRadius = '10px';
+    starsSection.style.padding = '15px 25px';
+    starsSection.style.backgroundColor = 'rgba(255, 215, 0, 0.1)';
+    starsSection.style.borderRadius = '8px';
+    starsSection.style.border = '1px solid rgba(255, 215, 0, 0.3)';
+    starsSection.style.boxShadow = '0 0 20px rgba(255, 215, 0, 0.2), inset 0 0 20px rgba(255, 215, 0, 0.05)';
     starsSection.style.cursor = 'pointer';
-    starsSection.style.display = 'none';  // Hidden until first prestige
+    starsSection.style.display = 'none';
+    starsSection.style.transition = 'all 0.2s ease';
     starsSection.title = 'Click to open Prestige Shop';
     starsSection.innerHTML = `
-        <div style="font-size: 14px; color: #888; margin-bottom: 5px;">Prestige</div>
-        <div style="font-size: 32px; font-weight: bold; color: #FFD700;">
+        <div style="font-size: 10px; font-family: 'Press Start 2P', cursive; color: #ffd700; margin-bottom: 8px; text-shadow: 0 0 10px rgba(255, 215, 0, 0.5);">PRESTIGE</div>
+        <div style="font-size: 28px; font-weight: bold; color: #ffd700; text-shadow: 0 0 10px #ffd700, 0 0 20px #cc9900;">
             ⭐ <span id="stars-value">0</span>
         </div>
     `;
@@ -1222,15 +1246,18 @@ function applyArcadeButtonStyle(
     button: HTMLButtonElement, 
     colorType: 'green' | 'blue' | 'orange' | 'purple' | 'gold' | 'disabled'
 ): void {
-    button.style.padding = '10px 16px';
-    button.style.fontSize = '11px';
+    button.style.padding = '14px 16px';
+    button.style.fontSize = '8px';
+    button.style.fontFamily = "'Press Start 2P', cursive";
     button.style.fontWeight = 'bold';
+    button.style.textTransform = 'uppercase';
+    button.style.lineHeight = '1.4';
     button.style.border = 'none';
     button.style.borderRadius = '4px';
     button.style.cursor = colorType === 'disabled' ? 'not-allowed' : 'pointer';
     button.style.transition = 'all 0.15s ease';
     button.style.width = '100%';
-    button.style.marginBottom = '8px';
+    button.style.marginBottom = '12px';
     
     switch (colorType) {
         case 'green':
@@ -1332,12 +1359,13 @@ function createUI(): void {
             slot.className = 'mini-board-slot';
             slot.style.width = `${BOARD_WIDTH_MINI + PADDING_MINI * 2}px`;
             slot.style.height = `${BOARD_HEIGHT_MINI + PADDING_MINI * 2}px`;
-            slot.style.backgroundColor = 'rgba(30, 30, 30, 0.8)';
-            slot.style.borderRadius = '8px';
+            slot.style.backgroundColor = 'rgba(13, 13, 26, 0.9)';
+            slot.style.borderRadius = '6px';
             slot.style.position = 'relative';
-            slot.style.border = '2px dashed rgba(100, 100, 100, 0.5)';
+            slot.style.border = '2px dashed rgba(0, 212, 255, 0.2)';
+            slot.style.boxShadow = 'inset 0 0 20px rgba(0, 0, 0, 0.5)';
             
-            // Create lock overlay for empty slots
+            // Create lock overlay for empty slots with retro styling
             const lockOverlay = document.createElement('div');
             lockOverlay.id = `slot-lock-${slotIndex}`;
             lockOverlay.style.position = 'absolute';
@@ -1350,31 +1378,34 @@ function createUI(): void {
             lockOverlay.style.justifyContent = 'center';
             lockOverlay.style.alignItems = 'center';
             lockOverlay.style.borderRadius = '6px';
+            lockOverlay.style.background = 'linear-gradient(180deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.5) 100%)';
             
             // Lock icon
             const lockIcon = document.createElement('div');
             lockIcon.className = 'lock-icon';
             lockIcon.textContent = '🔒';
-            lockIcon.style.fontSize = '24px';
-            lockIcon.style.marginBottom = '5px';
-            lockIcon.style.opacity = '0.6';
+            lockIcon.style.fontSize = '20px';
+            lockIcon.style.marginBottom = '8px';
+            lockIcon.style.opacity = '0.5';
             
             // Board number label
             const boardLabel = document.createElement('div');
             boardLabel.className = 'board-label';
-            boardLabel.textContent = `Board ${slotIndex + 2}`;
-            boardLabel.style.fontSize = '10px';
-            boardLabel.style.color = 'rgba(255, 255, 255, 0.5)';
-            boardLabel.style.fontWeight = 'bold';
+            boardLabel.textContent = `BOARD ${slotIndex + 2}`;
+            boardLabel.style.fontSize = '8px';
+            boardLabel.style.fontFamily = "'Press Start 2P', cursive";
+            boardLabel.style.color = 'rgba(255, 255, 255, 0.4)';
+            boardLabel.style.marginBottom = '4px';
             
             // Unlock cost display
             const unlockCost = document.createElement('div');
             unlockCost.className = 'unlock-cost';
             // Calculate cost for this slot's board (slot 0 = board 2, etc.)
             const cost = Math.round(BASE_COSTS.UNLOCK_NEXT_BOARD * Math.pow(COST_MULTIPLIER, slotIndex));
-            unlockCost.textContent = `${cost} pts`;
-            unlockCost.style.fontSize = '9px';
-            unlockCost.style.color = 'rgba(255, 255, 255, 0.4)';
+            unlockCost.textContent = `${cost} PTS`;
+            unlockCost.style.fontSize = '7px';
+            unlockCost.style.fontFamily = "'Press Start 2P', cursive";
+            unlockCost.style.color = 'rgba(255, 255, 255, 0.3)';
             unlockCost.style.marginTop = '2px';
             
             lockOverlay.appendChild(lockIcon);
@@ -1436,8 +1467,9 @@ function createBoardUI(boardIndex: number): void {
     nextPieceSection.style.padding = '15px';
     nextPieceSection.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
     nextPieceSection.style.borderRadius = '8px';
+    // Label for the next piece preview area with retro arcade styling
     nextPieceSection.innerHTML = `
-        <div style="font-size: 14px; opacity: 0.7; margin-bottom: 10px; text-align: center;">Next Piece</div>
+        <div style="font-size: 10px; font-family: 'Press Start 2P', cursive; color: #aaa; text-shadow: 0 0 10px rgba(0, 212, 255, 0.5); margin-bottom: 10px; text-align: center; letter-spacing: 1px;">NEXT PIECE</div>
     `;
     
     const nextPieceCanvas = document.createElement('canvas');
@@ -1497,17 +1529,6 @@ function createBoardUI(boardIndex: number): void {
     forceNextPieceContainer.appendChild(pieceIconsRow);
     nextPieceSection.appendChild(forceNextPieceContainer);
     
-    // Board status
-    const statusSection = document.createElement('div');
-    statusSection.id = `board-${boardIndex}-status`;
-    statusSection.style.marginBottom = '20px';
-    statusSection.style.padding = '10px';
-    statusSection.style.backgroundColor = 'rgba(76, 175, 80, 0.2)';
-    statusSection.style.borderRadius = '8px';
-    statusSection.style.textAlign = 'center';
-    statusSection.style.fontSize = '14px';
-    statusSection.innerHTML = '<span>🎮 Player Control</span>';
-    
     // Upgrades section
     const upgradesSection = document.createElement('div');
     upgradesSection.id = `board-${boardIndex}-upgrades`;
@@ -1516,7 +1537,6 @@ function createBoardUI(boardIndex: number): void {
     upgradesSection.style.gap = '10px';
     
     uiPanel.appendChild(nextPieceSection);
-    uiPanel.appendChild(statusSection);
     uiPanel.appendChild(upgradesSection);
     
     boardContainer.appendChild(uiPanel);
@@ -1625,7 +1645,6 @@ function hireAI(boardIndex: number): void {
     
     updatePointsDisplay();
     updateBoardButtons(boardIndex);
-    updateBoardStatus(boardIndex);
     
     console.log(`AI hired for board ${boardIndex + 1}!`);
 }
@@ -1721,7 +1740,6 @@ function activateTakeControl(boardIndex: number): void {
     board.aiMoving = false;
     
     updatePointsDisplay();
-    updateBoardStatus(boardIndex);
     updateTakeControlDisplay(boardIndex);
     
     console.log(`Board ${boardIndex + 1}: Player taking control for ${TAKE_CONTROL_PIECES} pieces`);
@@ -1759,6 +1777,8 @@ function updateTakeControlDisplay(boardIndex: number): void {
                 button.style.cursor = 'pointer';
                 button.disabled = false;
                 button.textContent = `Take Control (${cost} pts)`;
+                // Show dialogue hint when take control becomes affordable
+                showDialogue('take-control', button);
             } else {
                 button.style.display = 'none';
             }
@@ -1892,6 +1912,8 @@ function updatePrestigeButton(): void {
         const starsToEarn = getStarsFromScore(globalLinesCleared);
         button.style.display = 'block';
         button.textContent = `⭐ Prestige (+${starsToEarn} ⭐)`;
+        // Show dialogue hint when prestige becomes available
+        showDialogue('prestige', button);
     } else {
         button.style.display = 'none';
     }
@@ -1933,7 +1955,7 @@ function updateSlotLocks(): void {
         
         // Recalculate cost with prestige discount
         const baseCost = BASE_COSTS.UNLOCK_NEXT_BOARD * Math.pow(COST_MULTIPLIER, slotIndex);
-        const reduction = 1 - (costReductionLevel * COST_REDUCTION_PER_LEVEL);
+        const reduction = hasHalfCost ? 0.5 : 1;
         const cost = Math.round(baseCost * reduction);
         unlockCostEl.textContent = `${cost} pts`;
         
@@ -1941,14 +1963,34 @@ function updateSlotLocks(): void {
             // This slot is ready to be unlocked (previous board is maxed)
             lockIcon.textContent = '🔓';
             lockIcon.style.opacity = '1';
-            boardLabel.style.color = 'rgba(76, 175, 80, 0.9)'; // Green tint
-            unlockCostEl.style.color = 'rgba(76, 175, 80, 0.8)';
+            lockIcon.style.filter = 'drop-shadow(0 0 8px rgba(0, 255, 136, 0.8))';
+            boardLabel.style.color = '#00ff88';
+            boardLabel.style.textShadow = '0 0 10px rgba(0, 255, 136, 0.5)';
+            unlockCostEl.style.color = '#00ff88';
+            unlockCostEl.style.textShadow = '0 0 10px rgba(0, 255, 136, 0.5)';
+            
+            // Update slot border to show it's ready
+            const slot = document.getElementById(`mini-board-slot-${slotIndex}`);
+            if (slot) {
+                slot.style.border = '2px dashed rgba(0, 255, 136, 0.5)';
+                slot.style.boxShadow = 'inset 0 0 20px rgba(0, 0, 0, 0.5), 0 0 15px rgba(0, 255, 136, 0.2)';
+            }
         } else {
             // Still locked (previous board not maxed yet)
             lockIcon.textContent = '🔒';
             lockIcon.style.opacity = '0.5';
+            lockIcon.style.filter = 'none';
             boardLabel.style.color = 'rgba(255, 255, 255, 0.4)';
+            boardLabel.style.textShadow = 'none';
             unlockCostEl.style.color = 'rgba(255, 255, 255, 0.3)';
+            unlockCostEl.style.textShadow = 'none';
+            
+            // Reset slot border
+            const slot = document.getElementById(`mini-board-slot-${slotIndex}`);
+            if (slot) {
+                slot.style.border = '2px dashed rgba(0, 212, 255, 0.2)';
+                slot.style.boxShadow = 'inset 0 0 20px rgba(0, 0, 0, 0.5)';
+            }
         }
     }
 }
@@ -1997,8 +2039,9 @@ function resetForPrestige(): void {
             const slot = document.getElementById(`mini-board-slot-${i}`);
             if (slot) {
                 slot.innerHTML = '';
-                slot.style.backgroundColor = 'rgba(30, 30, 30, 0.8)';
-                slot.style.border = '2px dashed rgba(100, 100, 100, 0.5)';
+                slot.style.backgroundColor = 'rgba(13, 13, 26, 0.9)';
+                slot.style.border = '2px dashed rgba(0, 212, 255, 0.2)';
+                slot.style.boxShadow = 'inset 0 0 20px rgba(0, 0, 0, 0.5)';
                 
                 // Recreate lock overlay
                 const lockOverlay = document.createElement('div');
@@ -2017,23 +2060,25 @@ function resetForPrestige(): void {
                 const lockIcon = document.createElement('div');
                 lockIcon.className = 'lock-icon';
                 lockIcon.textContent = '🔒';
-                lockIcon.style.fontSize = '24px';
-                lockIcon.style.marginBottom = '5px';
-                lockIcon.style.opacity = '0.6';
+                lockIcon.style.fontSize = '20px';
+                lockIcon.style.marginBottom = '8px';
+                lockIcon.style.opacity = '0.5';
                 
                 const boardLabel = document.createElement('div');
                 boardLabel.className = 'board-label';
-                boardLabel.textContent = `Board ${i + 2}`;
-                boardLabel.style.fontSize = '10px';
-                boardLabel.style.color = 'rgba(255, 255, 255, 0.5)';
-                boardLabel.style.fontWeight = 'bold';
+                boardLabel.textContent = `BOARD ${i + 2}`;
+                boardLabel.style.fontSize = '8px';
+                boardLabel.style.fontFamily = "'Press Start 2P', cursive";
+                boardLabel.style.color = 'rgba(255, 255, 255, 0.4)';
+                boardLabel.style.marginBottom = '4px';
                 
                 const unlockCost = document.createElement('div');
                 unlockCost.className = 'unlock-cost';
                 const cost = Math.round(BASE_COSTS.UNLOCK_NEXT_BOARD * Math.pow(COST_MULTIPLIER, i));
-                unlockCost.textContent = `${cost} pts`;
-                unlockCost.style.fontSize = '9px';
-                unlockCost.style.color = 'rgba(255, 255, 255, 0.4)';
+                unlockCost.textContent = `${cost} PTS`;
+                unlockCost.style.fontSize = '7px';
+                unlockCost.style.fontFamily = "'Press Start 2P', cursive";
+                unlockCost.style.color = 'rgba(255, 255, 255, 0.3)';
                 unlockCost.style.marginTop = '2px';
                 
                 lockOverlay.appendChild(lockIcon);
@@ -2104,7 +2149,7 @@ function openPrestigeShop(): void {
     const existingModal = document.getElementById('prestige-shop-overlay');
     if (existingModal) existingModal.remove();
     
-    // Create overlay
+    // Create overlay with dark background
     const overlay = document.createElement('div');
     overlay.id = 'prestige-shop-overlay';
     overlay.style.position = 'fixed';
@@ -2112,105 +2157,206 @@ function openPrestigeShop(): void {
     overlay.style.left = '0';
     overlay.style.width = '100%';
     overlay.style.height = '100%';
-    overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
+    overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
     overlay.style.display = 'flex';
     overlay.style.justifyContent = 'center';
     overlay.style.alignItems = 'center';
     overlay.style.zIndex = '3000';
     
-    // Create modal
+    // Create modal with retro arcade styling
     const modal = document.createElement('div');
-    modal.style.backgroundColor = '#1a1a1a';
-    modal.style.border = '2px solid #FFD700';
-    modal.style.borderRadius = '12px';
-    modal.style.padding = '30px';
-    modal.style.minWidth = '400px';
-    modal.style.maxWidth = '500px';
+    modal.style.backgroundColor = '#0d0d1a';
+    modal.style.border = '3px solid #ffd700';
+    modal.style.borderRadius = '8px';
+    modal.style.padding = '30px 40px';
+    modal.style.minWidth = '420px';
     modal.style.color = 'white';
-    modal.style.fontFamily = 'Arial, sans-serif';
+    modal.style.fontFamily = "'Press Start 2P', cursive";
+    modal.style.textAlign = 'center';
+    modal.style.boxShadow = '0 0 30px rgba(255, 215, 0, 0.3), 0 0 60px rgba(255, 215, 0, 0.1), inset 0 0 30px rgba(0, 0, 0, 0.5)';
     
-    // Title
+    // Title with neon glow
     const title = document.createElement('h2');
-    title.textContent = '⭐ Prestige Shop ⭐';
+    title.textContent = '⭐ PRESTIGE SHOP ⭐';
     title.style.margin = '0 0 10px 0';
-    title.style.color = '#FFD700';
-    title.style.textAlign = 'center';
+    title.style.color = '#ffd700';
+    title.style.fontSize = '16px';
+    title.style.textShadow = '0 0 10px rgba(255, 215, 0, 0.5)';
     modal.appendChild(title);
     
-    // Stars balance
+    // Stars balance display
     const balance = document.createElement('div');
-    balance.style.textAlign = 'center';
-    balance.style.fontSize = '24px';
-    balance.style.marginBottom = '25px';
-    balance.style.color = '#FFD700';
-    balance.innerHTML = `Your Stars: <strong>${prestigeStars}</strong> ⭐`;
+    balance.style.fontSize = '12px';
+    balance.style.marginBottom = '8px';
+    balance.style.color = '#ffd700';
+    balance.style.textShadow = '0 0 10px rgba(255, 215, 0, 0.5)';
+    balance.innerHTML = `YOUR STARS: <span style="font-size: 16px;">${prestigeStars}</span> ⭐`;
     modal.appendChild(balance);
     
-    // Prestige count
+    // Prestige count subtitle
     const prestigeInfo = document.createElement('div');
-    prestigeInfo.style.textAlign = 'center';
-    prestigeInfo.style.fontSize = '14px';
+    prestigeInfo.style.fontSize = '8px';
     prestigeInfo.style.marginBottom = '25px';
-    prestigeInfo.style.color = '#888';
-    prestigeInfo.textContent = `Times Prestiged: ${prestigeCount}`;
+    prestigeInfo.style.color = '#666';
+    prestigeInfo.textContent = `TIMES PRESTIGED: ${prestigeCount}`;
     modal.appendChild(prestigeInfo);
     
     // Upgrades container
     const upgradesContainer = document.createElement('div');
     upgradesContainer.style.display = 'flex';
     upgradesContainer.style.flexDirection = 'column';
-    upgradesContainer.style.gap = '15px';
+    upgradesContainer.style.gap = '12px';
+    upgradesContainer.style.textAlign = 'left';
     
-    // Cost Reduction upgrade
-    const costReductionUpgrade = createPrestigeUpgradeRow(
-        'Cost Reduction',
-        `Reduce all upgrade costs by 5% per level`,
-        costReductionLevel,
-        MAX_PRESTIGE_UPGRADE_LEVEL,
-        `Current: ${(costReductionLevel * 5)}% off`,
-        () => purchasePrestigeUpgrade('costReduction')
-    );
-    upgradesContainer.appendChild(costReductionUpgrade);
+    // Helper function to create upgrade rows
+    function createUpgradeRow(name: string, description: string, isPurchased: boolean, onPurchase: () => void): HTMLElement {
+        const row = document.createElement('div');
+        row.style.backgroundColor = 'rgba(255, 215, 0, 0.05)';
+        row.style.borderRadius = '6px';
+        row.style.padding = '14px';
+        row.style.borderLeft = isPurchased ? '3px solid #00ff88' : '3px solid #ffd700';
+        row.style.display = 'flex';
+        row.style.justifyContent = 'space-between';
+        row.style.alignItems = 'center';
+        row.style.gap = '15px';
+        
+        // Left side - name and description
+        const textContainer = document.createElement('div');
+        textContainer.style.flex = '1';
+        
+        const nameEl = document.createElement('div');
+        nameEl.style.fontSize = '10px';
+        nameEl.style.marginBottom = '6px';
+        nameEl.style.color = isPurchased ? '#00ff88' : '#ffd700';
+        nameEl.style.textShadow = isPurchased ? '0 0 10px rgba(0, 255, 136, 0.5)' : '0 0 10px rgba(255, 215, 0, 0.3)';
+        nameEl.textContent = name;
+        textContainer.appendChild(nameEl);
+        
+        const descEl = document.createElement('div');
+        descEl.style.fontSize = '8px';
+        descEl.style.color = '#888';
+        descEl.style.lineHeight = '1.6';
+        descEl.textContent = description;
+        textContainer.appendChild(descEl);
+        
+        row.appendChild(textContainer);
+        
+        // Right side - button
+        const buyButton = document.createElement('button');
+        buyButton.style.padding = '10px 16px';
+        buyButton.style.border = 'none';
+        buyButton.style.borderRadius = '4px';
+        buyButton.style.fontSize = '8px';
+        buyButton.style.fontFamily = "'Press Start 2P', cursive";
+        buyButton.style.cursor = 'pointer';
+        buyButton.style.transition = 'all 0.15s ease';
+        buyButton.style.whiteSpace = 'nowrap';
+        
+        if (isPurchased) {
+            // Already purchased - show checkmark
+            buyButton.textContent = '✓ OWNED';
+            buyButton.style.background = 'linear-gradient(180deg, #00ff88 0%, #00cc6a 100%)';
+            buyButton.style.color = '#000';
+            buyButton.style.boxShadow = '0 3px 0 #009950, 0 0 10px rgba(0, 255, 136, 0.3)';
+            buyButton.style.cursor = 'default';
+            buyButton.disabled = true;
+        } else if (prestigeStars >= 1) {
+            // Can afford - show buy button
+            buyButton.textContent = 'BUY 1 ⭐';
+            buyButton.style.background = 'linear-gradient(180deg, #ffd700 0%, #cc9900 100%)';
+            buyButton.style.color = '#000';
+            buyButton.style.boxShadow = '0 3px 0 #997700, 0 0 10px rgba(255, 215, 0, 0.3)';
+            
+            buyButton.addEventListener('mouseenter', () => {
+                buyButton.style.transform = 'translateY(-2px)';
+                buyButton.style.boxShadow = '0 5px 0 #997700, 0 0 20px rgba(255, 215, 0, 0.5)';
+            });
+            buyButton.addEventListener('mouseleave', () => {
+                buyButton.style.transform = 'translateY(0)';
+                buyButton.style.boxShadow = '0 3px 0 #997700, 0 0 10px rgba(255, 215, 0, 0.3)';
+            });
+            buyButton.addEventListener('click', () => {
+                onPurchase();
+                // Refresh the shop
+                overlay.remove();
+                openPrestigeShop();
+            });
+        } else {
+            // Can't afford - disabled button
+            buyButton.textContent = 'NEED 1 ⭐';
+            buyButton.style.background = 'linear-gradient(180deg, #444 0%, #333 100%)';
+            buyButton.style.color = '#666';
+            buyButton.style.boxShadow = '0 3px 0 #222';
+            buyButton.style.cursor = 'not-allowed';
+            buyButton.disabled = true;
+        }
+        
+        row.appendChild(buyButton);
+        return row;
+    }
     
-    // Points Multiplier upgrade
-    const pointsMultiplierUpgrade = createPrestigeUpgradeRow(
-        'Points Multiplier',
-        `Earn 10% more points per line per level`,
-        pointsMultiplierLevel,
-        MAX_PRESTIGE_UPGRADE_LEVEL,
-        `Current: ${(1 + pointsMultiplierLevel * 0.1).toFixed(1)}x`,
-        () => purchasePrestigeUpgrade('pointsMultiplier')
+    // Create the three upgrade rows
+    const doublePointsRow = createUpgradeRow(
+        '2X POINTS',
+        'Double all points earned from clearing lines.',
+        hasDoublePoints,
+        () => purchasePrestigeUpgrade('doublePoints')
     );
-    upgradesContainer.appendChild(pointsMultiplierUpgrade);
+    upgradesContainer.appendChild(doublePointsRow);
+    
+    const halfCostRow = createUpgradeRow(
+        '50% COST',
+        'All upgrades cost half as many points.',
+        hasHalfCost,
+        () => purchasePrestigeUpgrade('halfCost')
+    );
+    upgradesContainer.appendChild(halfCostRow);
+    
+    const autoResetRow = createUpgradeRow(
+        'AUTO-RESET',
+        'Mini boards automatically reset when they lose.',
+        hasAutoReset,
+        () => purchasePrestigeUpgrade('autoReset')
+    );
+    upgradesContainer.appendChild(autoResetRow);
     
     modal.appendChild(upgradesContainer);
     
-    // Shop status
-    const shopStatus = document.createElement('div');
-    shopStatus.id = 'shop-status';
-    shopStatus.style.textAlign = 'center';
-    shopStatus.style.marginTop = '20px';
-    shopStatus.style.fontSize = '14px';
-    shopStatus.style.color = '#888';
-    if (costReductionLevel >= MAX_PRESTIGE_UPGRADE_LEVEL && pointsMultiplierLevel >= MAX_PRESTIGE_UPGRADE_LEVEL) {
-        shopStatus.innerHTML = '<span style="color: #4CAF50;">✓ Shop Sold Out! All upgrades maxed.</span>';
+    // Shop status - check if all upgrades are purchased
+    if (hasDoublePoints && hasHalfCost && hasAutoReset) {
+        const shopStatus = document.createElement('div');
+        shopStatus.style.marginTop = '20px';
+        shopStatus.style.fontSize = '10px';
+        shopStatus.style.color = '#00ff88';
+        shopStatus.style.textShadow = '0 0 10px rgba(0, 255, 136, 0.5)';
+        shopStatus.textContent = '✓ SHOP COMPLETE!';
+        modal.appendChild(shopStatus);
     }
-    modal.appendChild(shopStatus);
     
-    // Close button
+    // Close button with arcade styling
     const closeButton = document.createElement('button');
-    closeButton.textContent = 'Close';
+    closeButton.textContent = 'CLOSE';
     closeButton.style.display = 'block';
     closeButton.style.margin = '25px auto 0';
-    closeButton.style.padding = '12px 40px';
-    closeButton.style.backgroundColor = '#FFD700';
+    closeButton.style.padding = '12px 30px';
+    closeButton.style.background = 'linear-gradient(180deg, #00d4ff 0%, #0099cc 100%)';
     closeButton.style.color = '#000';
     closeButton.style.border = 'none';
-    closeButton.style.borderRadius = '6px';
-    closeButton.style.fontSize = '16px';
-    closeButton.style.fontWeight = 'bold';
+    closeButton.style.borderRadius = '4px';
+    closeButton.style.fontSize = '10px';
+    closeButton.style.fontFamily = "'Press Start 2P', cursive";
     closeButton.style.cursor = 'pointer';
+    closeButton.style.boxShadow = '0 4px 0 #007799, 0 0 15px rgba(0, 212, 255, 0.4)';
+    closeButton.style.transition = 'all 0.15s ease';
     
+    closeButton.addEventListener('mouseenter', () => {
+        closeButton.style.transform = 'translateY(-2px)';
+        closeButton.style.boxShadow = '0 6px 0 #007799, 0 0 25px rgba(0, 212, 255, 0.6)';
+    });
+    closeButton.addEventListener('mouseleave', () => {
+        closeButton.style.transform = 'translateY(0)';
+        closeButton.style.boxShadow = '0 4px 0 #007799, 0 0 15px rgba(0, 212, 255, 0.4)';
+    });
     closeButton.addEventListener('click', () => overlay.remove());
     modal.appendChild(closeButton);
     
@@ -2223,110 +2369,28 @@ function openPrestigeShop(): void {
     document.body.appendChild(overlay);
 }
 
-function createPrestigeUpgradeRow(
-    name: string,
-    description: string,
-    currentLevel: number,
-    maxLevel: number,
-    currentEffect: string,
-    onPurchase: () => void
-): HTMLElement {
-    const row = document.createElement('div');
-    row.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
-    row.style.borderRadius = '8px';
-    row.style.padding = '15px';
-    row.style.borderLeft = '3px solid #FFD700';
-    
-    const header = document.createElement('div');
-    header.style.display = 'flex';
-    header.style.justifyContent = 'space-between';
-    header.style.alignItems = 'center';
-    header.style.marginBottom = '8px';
-    
-    const nameEl = document.createElement('div');
-    nameEl.style.fontWeight = 'bold';
-    nameEl.style.fontSize = '16px';
-    nameEl.textContent = name;
-    
-    const levelEl = document.createElement('div');
-    levelEl.style.fontSize = '14px';
-    levelEl.style.color = '#888';
-    levelEl.textContent = `Level ${currentLevel}/${maxLevel}`;
-    
-    header.appendChild(nameEl);
-    header.appendChild(levelEl);
-    row.appendChild(header);
-    
-    const desc = document.createElement('div');
-    desc.style.fontSize = '12px';
-    desc.style.color = '#aaa';
-    desc.style.marginBottom = '8px';
-    desc.textContent = description;
-    row.appendChild(desc);
-    
-    const effectEl = document.createElement('div');
-    effectEl.style.fontSize = '13px';
-    effectEl.style.color = '#4CAF50';
-    effectEl.style.marginBottom = '10px';
-    effectEl.textContent = currentEffect;
-    row.appendChild(effectEl);
-    
-    const buyButton = document.createElement('button');
-    buyButton.style.width = '100%';
-    buyButton.style.padding = '8px';
-    buyButton.style.border = 'none';
-    buyButton.style.borderRadius = '4px';
-    buyButton.style.fontSize = '14px';
-    buyButton.style.fontWeight = 'bold';
-    buyButton.style.cursor = 'pointer';
-    buyButton.style.transition = 'all 0.2s ease';
-    
-    if (currentLevel >= maxLevel) {
-        buyButton.textContent = 'MAXED OUT';
-        buyButton.style.backgroundColor = '#888';
-        buyButton.style.color = '#ccc';
-        buyButton.style.cursor = 'default';
-        buyButton.disabled = true;
-    } else if (prestigeStars >= 1) {
-        buyButton.textContent = 'Upgrade (1 ⭐)';
-        buyButton.style.backgroundColor = '#FFD700';
-        buyButton.style.color = '#000';
-        buyButton.addEventListener('click', () => {
-            onPurchase();
-            // Refresh the shop
-            const overlay = document.getElementById('prestige-shop-overlay');
-            if (overlay) overlay.remove();
-            openPrestigeShop();
-        });
-    } else {
-        buyButton.textContent = 'Need 1 ⭐';
-        buyButton.style.backgroundColor = '#444';
-        buyButton.style.color = '#888';
-        buyButton.style.cursor = 'not-allowed';
-        buyButton.disabled = true;
-    }
-    
-    row.appendChild(buyButton);
-    return row;
-}
-
-function purchasePrestigeUpgrade(upgradeType: 'costReduction' | 'pointsMultiplier'): void {
+function purchasePrestigeUpgrade(upgradeType: 'doublePoints' | 'halfCost' | 'autoReset'): void {
     if (prestigeStars < 1) return;
     
-    if (upgradeType === 'costReduction' && costReductionLevel < MAX_PRESTIGE_UPGRADE_LEVEL) {
+    if (upgradeType === 'doublePoints' && !hasDoublePoints) {
         prestigeStars--;
-        costReductionLevel++;
-        console.log(`Cost Reduction upgraded to level ${costReductionLevel} (${costReductionLevel * 5}% off)`);
-    } else if (upgradeType === 'pointsMultiplier' && pointsMultiplierLevel < MAX_PRESTIGE_UPGRADE_LEVEL) {
+        hasDoublePoints = true;
+        console.log('Purchased 2x Points!');
+    } else if (upgradeType === 'halfCost' && !hasHalfCost) {
         prestigeStars--;
-        pointsMultiplierLevel++;
-        console.log(`Points Multiplier upgraded to level ${pointsMultiplierLevel} (${(1 + pointsMultiplierLevel * 0.1).toFixed(1)}x)`);
+        hasHalfCost = true;
+        console.log('Purchased 50% Cost Reduction!');
+    } else if (upgradeType === 'autoReset' && !hasAutoReset) {
+        prestigeStars--;
+        hasAutoReset = true;
+        console.log('Purchased Auto-Reset!');
     }
     
     updateStarsDisplay();
     // Update all button costs since they may have changed
     updateBoardButtons(activeBoardIndex);
     updateUnlockNextBoardButton();
+    updateSlotLocks();
 }
 
 function minifyBoard(board: Board): void {
@@ -2371,8 +2435,6 @@ function minifyBoard(board: Board): void {
     
     // Store container reference
     board.container = slot;
-    
-    updateBoardStatus(board.index);
 }
 
 function createNewBoardUI(boardIndex: number): void {
@@ -2596,6 +2658,8 @@ function updateBoardButtons(boardIndex: number): void {
             forceNextPieceButton.style.cursor = 'pointer';
             forceNextPieceButton.disabled = false;
             forceNextPieceButton.textContent = `Force Piece (${forceNextPieceCost} pts)`;
+            // Show dialogue hint when force next piece becomes affordable
+            showDialogue('force-next-piece', forceNextPieceButton);
         } else {
             // Can't afford - hide button
             forceNextPieceButton.style.display = 'none';
@@ -2609,29 +2673,13 @@ function updateBoardButtons(boardIndex: number): void {
     updateTakeControlDisplay(boardIndex);
 }
 
-function updateBoardStatus(boardIndex: number): void {
-    const statusSection = document.getElementById(`board-${boardIndex}-status`);
-    if (!statusSection) return;
-    
-    const board = boards[boardIndex];
-    if (!board) return;
-    
-    if (board.aiEnabled) {
-        statusSection.style.backgroundColor = 'rgba(255, 152, 0, 0.2)';
-        statusSection.innerHTML = '<span>🤖 AI Control</span>';
-    } else {
-        statusSection.style.backgroundColor = 'rgba(76, 175, 80, 0.2)';
-        statusSection.innerHTML = '<span>🎮 Player Control</span>';
-    }
-}
-
 function updateControlsDisplay(): void {
     const spaceControlText = document.getElementById('space-control-text');
     if (!spaceControlText) return;
     
     if (hardDropUnlocked) {
-        spaceControlText.style.opacity = '1';
-        spaceControlText.style.color = '#4CAF50';
+        spaceControlText.style.color = '#00ff88';
+        spaceControlText.style.textShadow = '0 0 10px rgba(0, 255, 136, 0.5)';
         spaceControlText.innerHTML = 'Space : Hard Drop ✓';
     } else {
         spaceControlText.style.opacity = '0.5';
@@ -2877,6 +2925,27 @@ function resetBoard(boardIndex: number): void {
     console.log(`Board ${boardIndex + 1} reset!`);
 }
 
+function autoResetBoard(boardIndex: number): void {
+    const board = boards[boardIndex];
+    if (!board) return;
+    
+    // Reset board state without costing any points
+    board.grid = createEmptyGrid();
+    board.currentPiece = null;
+    board.nextPiece = null;
+    board.isGameOver = false;
+    board.lastDropTime = performance.now();
+    
+    // Keep AI settings (board stays maxed out)
+    board.aiEnabled = true;
+    board.aiTargetPosition = null;
+    board.aiMoving = false;
+    
+    spawnNewPiece(board);
+    
+    console.log(`Board ${boardIndex + 1} auto-reset!`);
+}
+
 function resetGame(): void {
     hideGameOverScreen();
     
@@ -2899,8 +2968,9 @@ function resetGame(): void {
             const slot = document.getElementById(`mini-board-slot-${i}`);
             if (slot) {
                 slot.innerHTML = '';
-                slot.style.backgroundColor = 'rgba(30, 30, 30, 0.8)';
-                slot.style.border = '2px dashed rgba(100, 100, 100, 0.5)';
+                slot.style.backgroundColor = 'rgba(13, 13, 26, 0.9)';
+                slot.style.border = '2px dashed rgba(0, 212, 255, 0.2)';
+                slot.style.boxShadow = 'inset 0 0 20px rgba(0, 0, 0, 0.5)';
                 
                 // Recreate lock overlay
                 const lockOverlay = document.createElement('div');
@@ -2919,23 +2989,25 @@ function resetGame(): void {
                 const lockIcon = document.createElement('div');
                 lockIcon.className = 'lock-icon';
                 lockIcon.textContent = '🔒';
-                lockIcon.style.fontSize = '24px';
-                lockIcon.style.marginBottom = '5px';
-                lockIcon.style.opacity = '0.6';
+                lockIcon.style.fontSize = '20px';
+                lockIcon.style.marginBottom = '8px';
+                lockIcon.style.opacity = '0.5';
                 
                 const boardLabel = document.createElement('div');
                 boardLabel.className = 'board-label';
-                boardLabel.textContent = `Board ${i + 2}`;
-                boardLabel.style.fontSize = '10px';
-                boardLabel.style.color = 'rgba(255, 255, 255, 0.5)';
-                boardLabel.style.fontWeight = 'bold';
+                boardLabel.textContent = `BOARD ${i + 2}`;
+                boardLabel.style.fontSize = '8px';
+                boardLabel.style.fontFamily = "'Press Start 2P', cursive";
+                boardLabel.style.color = 'rgba(255, 255, 255, 0.4)';
+                boardLabel.style.marginBottom = '4px';
                 
                 const unlockCost = document.createElement('div');
                 unlockCost.className = 'unlock-cost';
                 const cost = Math.round(BASE_COSTS.UNLOCK_NEXT_BOARD * Math.pow(COST_MULTIPLIER, i));
-                unlockCost.textContent = `${cost} pts`;
-                unlockCost.style.fontSize = '9px';
-                unlockCost.style.color = 'rgba(255, 255, 255, 0.4)';
+                unlockCost.textContent = `${cost} PTS`;
+                unlockCost.style.fontSize = '7px';
+                unlockCost.style.fontFamily = "'Press Start 2P', cursive";
+                unlockCost.style.color = 'rgba(255, 255, 255, 0.3)';
                 unlockCost.style.marginTop = '2px';
                 
                 lockOverlay.appendChild(lockIcon);
@@ -3081,49 +3153,53 @@ async function showLeaderboardModal(startNewGameOnClose: boolean): Promise<void>
     overlay.style.alignItems = 'center';
     overlay.style.zIndex = '10000';
     
-    // Create modal
+    // Create modal with retro arcade styling
     const modal = document.createElement('div');
-    modal.style.backgroundColor = '#1a1a1a';
-    modal.style.border = '3px solid #9C27B0';
-    modal.style.borderRadius = '16px';
+    modal.style.backgroundColor = '#0d0d1a';
+    modal.style.border = '3px solid #ffd700';
+    modal.style.borderRadius = '8px';
     modal.style.padding = '30px 40px';
-    modal.style.minWidth = '350px';
+    modal.style.minWidth = '380px';
     modal.style.color = 'white';
-    modal.style.fontFamily = 'Arial, sans-serif';
+    modal.style.fontFamily = "'Press Start 2P', cursive";
     modal.style.textAlign = 'center';
+    modal.style.boxShadow = '0 0 30px rgba(255, 215, 0, 0.3), 0 0 60px rgba(255, 215, 0, 0.1), inset 0 0 30px rgba(0, 0, 0, 0.5)';
     
     // Title
     const title = document.createElement('h2');
-    title.textContent = '🏆 MONTHLY LEADERBOARD 🏆';
+    title.textContent = '🏆 LEADERBOARD 🏆';
     title.style.margin = '0 0 10px 0';
-    title.style.color = '#FFD700';
-    title.style.fontSize = '24px';
+    title.style.color = '#ffd700';
+    title.style.fontSize = '16px';
+    title.style.textShadow = '0 0 10px rgba(255, 215, 0, 0.5)';
     modal.appendChild(title);
     
     // Month indicator
-    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
-                        'July', 'August', 'September', 'October', 'November', 'December'];
+    const monthNames = ['JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE',
+                        'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'];
     const now = new Date();
     const monthLabel = document.createElement('div');
     monthLabel.textContent = `${monthNames[now.getMonth()]} ${now.getFullYear()}`;
-    monthLabel.style.color = '#888';
-    monthLabel.style.fontSize = '14px';
+    monthLabel.style.color = '#00d4ff';
+    monthLabel.style.fontSize = '10px';
     monthLabel.style.marginBottom = '20px';
+    monthLabel.style.textShadow = '0 0 10px rgba(0, 212, 255, 0.5)';
     modal.appendChild(monthLabel);
     
     // Loading indicator
     const loadingText = document.createElement('div');
-    loadingText.textContent = 'Loading...';
+    loadingText.textContent = 'LOADING...';
     loadingText.style.color = '#888';
     loadingText.style.padding = '20px';
+    loadingText.style.fontSize = '10px';
     modal.appendChild(loadingText);
     
     // Close instruction
     const closeHint = document.createElement('div');
-    closeHint.textContent = startNewGameOnClose ? 'Click anywhere to play again' : 'Click anywhere to close';
+    closeHint.textContent = startNewGameOnClose ? 'CLICK TO PLAY AGAIN' : 'CLICK TO CLOSE';
     closeHint.style.marginTop = '20px';
     closeHint.style.color = '#666';
-    closeHint.style.fontSize = '12px';
+    closeHint.style.fontSize = '8px';
     modal.appendChild(closeHint);
     
     // Close on click
@@ -3152,10 +3228,12 @@ async function showLeaderboardModal(startNewGameOnClose: boolean): Promise<void>
     
     if (scores.length === 0) {
         const noScores = document.createElement('div');
-        noScores.textContent = 'No scores yet this month. Be the first!';
-        noScores.style.color = '#888';
+        noScores.textContent = 'NO SCORES YET. BE THE FIRST!';
+        noScores.style.color = '#00d4ff';
         noScores.style.padding = '20px';
         noScores.style.textAlign = 'center';
+        noScores.style.fontSize = '10px';
+        noScores.style.textShadow = '0 0 10px rgba(0, 212, 255, 0.5)';
         table.appendChild(noScores);
     } else {
         scores.forEach((entry, index) => {
@@ -3163,49 +3241,53 @@ async function showLeaderboardModal(startNewGameOnClose: boolean): Promise<void>
             row.style.display = 'flex';
             row.style.justifyContent = 'space-between';
             row.style.alignItems = 'center';
-            row.style.padding = '10px 15px';
-            row.style.borderRadius = '8px';
-            row.style.marginBottom = '5px';
+            row.style.padding = '12px 15px';
+            row.style.borderRadius = '4px';
+            row.style.marginBottom = '6px';
             
-            // Highlight top 3
+            // Highlight top 3 with neon glow
             if (index === 0) {
-                row.style.backgroundColor = 'rgba(255, 215, 0, 0.2)';
-                row.style.border = '1px solid #FFD700';
+                row.style.backgroundColor = 'rgba(255, 215, 0, 0.15)';
+                row.style.border = '1px solid #ffd700';
+                row.style.boxShadow = '0 0 10px rgba(255, 215, 0, 0.3)';
             } else if (index === 1) {
-                row.style.backgroundColor = 'rgba(192, 192, 192, 0.2)';
-                row.style.border = '1px solid #C0C0C0';
+                row.style.backgroundColor = 'rgba(192, 192, 192, 0.15)';
+                row.style.border = '1px solid #c0c0c0';
+                row.style.boxShadow = '0 0 10px rgba(192, 192, 192, 0.2)';
             } else if (index === 2) {
-                row.style.backgroundColor = 'rgba(205, 127, 50, 0.2)';
-                row.style.border = '1px solid #CD7F32';
+                row.style.backgroundColor = 'rgba(205, 127, 50, 0.15)';
+                row.style.border = '1px solid #cd7f32';
+                row.style.boxShadow = '0 0 10px rgba(205, 127, 50, 0.2)';
             } else {
-                row.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+                row.style.backgroundColor = 'rgba(255, 255, 255, 0.03)';
+                row.style.border = '1px solid rgba(255, 255, 255, 0.1)';
             }
             
             // Rank
             const rank = document.createElement('span');
             rank.style.width = '30px';
-            rank.style.fontWeight = 'bold';
+            rank.style.fontSize = '12px';
             if (index === 0) rank.textContent = '🥇';
             else if (index === 1) rank.textContent = '🥈';
             else if (index === 2) rank.textContent = '🥉';
             else rank.textContent = `${index + 1}.`;
-            rank.style.color = index < 3 ? '#FFD700' : '#888';
+            rank.style.color = index < 3 ? '#ffd700' : '#666';
             
             // Name
             const name = document.createElement('span');
             name.textContent = entry.name;
-            name.style.fontWeight = 'bold';
-            name.style.fontSize = '18px';
-            name.style.letterSpacing = '2px';
+            name.style.fontSize = '12px';
+            name.style.letterSpacing = '3px';
             name.style.flex = '1';
             name.style.marginLeft = '10px';
+            name.style.color = '#e8e8e8';
             
             // Score
             const score = document.createElement('span');
             score.textContent = entry.score.toLocaleString();
-            score.style.color = '#4CAF50';
-            score.style.fontWeight = 'bold';
-            score.style.fontSize = '18px';
+            score.style.color = '#00ff88';
+            score.style.fontSize = '12px';
+            score.style.textShadow = '0 0 10px rgba(0, 255, 136, 0.5)';
             
             row.appendChild(rank);
             row.appendChild(name);
@@ -3238,39 +3320,43 @@ function showNameEntry(): void {
     overlay.style.alignItems = 'center';
     overlay.style.zIndex = '10000';
     
-    // Create modal
+    // Create modal with retro arcade styling matching the leaderboard
     const modal = document.createElement('div');
-    modal.style.backgroundColor = '#1a1a1a';
+    modal.style.backgroundColor = '#0d0d1a';
     modal.style.border = '3px solid #ff4444';
-    modal.style.borderRadius = '16px';
-    modal.style.padding = '40px';
+    modal.style.borderRadius = '8px';
+    modal.style.padding = '30px 40px';
+    modal.style.minWidth = '380px';
     modal.style.color = 'white';
-    modal.style.fontFamily = 'Arial, sans-serif';
+    modal.style.fontFamily = "'Press Start 2P', cursive";
     modal.style.textAlign = 'center';
+    modal.style.boxShadow = '0 0 30px rgba(255, 68, 68, 0.3), 0 0 60px rgba(255, 68, 68, 0.1), inset 0 0 30px rgba(0, 0, 0, 0.5)';
     
-    // Game Over title
+    // Game Over title with neon glow effect
     const title = document.createElement('h1');
     title.textContent = 'GAME OVER';
     title.style.margin = '0 0 10px 0';
     title.style.color = '#ff4444';
-    title.style.fontSize = '36px';
+    title.style.fontSize = '20px';
+    title.style.textShadow = '0 0 10px rgba(255, 68, 68, 0.5), 0 0 20px rgba(255, 68, 68, 0.3)';
     modal.appendChild(title);
     
-    // Score display
+    // Score display with retro arcade styling
     const scoreDisplay = document.createElement('div');
-    scoreDisplay.style.marginBottom = '30px';
+    scoreDisplay.style.marginBottom = '25px';
     scoreDisplay.innerHTML = `
-        <div style="color: #888; font-size: 14px;">YOUR SCORE</div>
-        <div style="color: #4CAF50; font-size: 48px; font-weight: bold;">${globalLinesCleared.toLocaleString()}</div>
+        <div style="color: #888; font-size: 10px; margin-bottom: 8px;">YOUR SCORE</div>
+        <div style="color: #00ff88; font-size: 28px; text-shadow: 0 0 10px rgba(0, 255, 136, 0.5);">${globalLinesCleared.toLocaleString()}</div>
     `;
     modal.appendChild(scoreDisplay);
     
-    // Enter initials prompt
+    // Enter initials prompt with gold arcade styling
     const prompt = document.createElement('div');
     prompt.textContent = 'ENTER YOUR INITIALS';
-    prompt.style.color = '#FFD700';
-    prompt.style.fontSize = '18px';
+    prompt.style.color = '#ffd700';
+    prompt.style.fontSize = '10px';
     prompt.style.marginBottom = '20px';
+    prompt.style.textShadow = '0 0 10px rgba(255, 215, 0, 0.5)';
     modal.appendChild(prompt);
     
     // Current selection state
@@ -3293,46 +3379,56 @@ function showNameEntry(): void {
         letterBox.style.flexDirection = 'column';
         letterBox.style.alignItems = 'center';
         
-        // Up arrow
+        // Up arrow with retro arcade styling
         const upArrow = document.createElement('button');
         upArrow.textContent = '▲';
         upArrow.style.backgroundColor = 'transparent';
         upArrow.style.border = 'none';
-        upArrow.style.color = '#4CAF50';
-        upArrow.style.fontSize = '24px';
+        upArrow.style.color = '#00ff88';
+        upArrow.style.fontSize = '20px';
         upArrow.style.cursor = 'pointer';
         upArrow.style.padding = '5px 15px';
+        upArrow.style.textShadow = '0 0 10px rgba(0, 255, 136, 0.5)';
+        upArrow.style.transition = 'all 0.15s ease';
+        upArrow.addEventListener('mouseenter', () => { upArrow.style.transform = 'scale(1.2)'; });
+        upArrow.addEventListener('mouseleave', () => { upArrow.style.transform = 'scale(1)'; });
         upArrow.addEventListener('click', () => {
             const charCode = currentInitials[i].charCodeAt(0);
             currentInitials[i] = charCode >= 90 ? 'A' : String.fromCharCode(charCode + 1);
             letterDisplays[i].textContent = currentInitials[i];
         });
         
-        // Letter display
+        // Letter display with retro arcade styling
         const letterDisplay = document.createElement('div');
         letterDisplay.textContent = currentInitials[i];
         letterDisplay.style.width = '50px';
         letterDisplay.style.height = '60px';
-        letterDisplay.style.backgroundColor = '#333';
-        letterDisplay.style.border = '2px solid #4CAF50';
-        letterDisplay.style.borderRadius = '8px';
+        letterDisplay.style.backgroundColor = '#1a1a2e';
+        letterDisplay.style.border = '2px solid #00ff88';
+        letterDisplay.style.borderRadius = '6px';
         letterDisplay.style.display = 'flex';
         letterDisplay.style.justifyContent = 'center';
         letterDisplay.style.alignItems = 'center';
-        letterDisplay.style.fontSize = '36px';
-        letterDisplay.style.fontWeight = 'bold';
-        letterDisplay.style.fontFamily = 'monospace';
+        letterDisplay.style.fontSize = '28px';
+        letterDisplay.style.fontFamily = "'Press Start 2P', cursive";
+        letterDisplay.style.color = '#00ff88';
+        letterDisplay.style.textShadow = '0 0 10px rgba(0, 255, 136, 0.5)';
+        letterDisplay.style.boxShadow = '0 0 15px rgba(0, 255, 136, 0.2), inset 0 0 20px rgba(0, 0, 0, 0.5)';
         letterDisplays.push(letterDisplay);
         
-        // Down arrow
+        // Down arrow with retro arcade styling
         const downArrow = document.createElement('button');
         downArrow.textContent = '▼';
         downArrow.style.backgroundColor = 'transparent';
         downArrow.style.border = 'none';
-        downArrow.style.color = '#4CAF50';
-        downArrow.style.fontSize = '24px';
+        downArrow.style.color = '#00ff88';
+        downArrow.style.fontSize = '20px';
         downArrow.style.cursor = 'pointer';
         downArrow.style.padding = '5px 15px';
+        downArrow.style.textShadow = '0 0 10px rgba(0, 255, 136, 0.5)';
+        downArrow.style.transition = 'all 0.15s ease';
+        downArrow.addEventListener('mouseenter', () => { downArrow.style.transform = 'scale(1.2)'; });
+        downArrow.addEventListener('mouseleave', () => { downArrow.style.transform = 'scale(1)'; });
         downArrow.addEventListener('click', () => {
             const charCode = currentInitials[i].charCodeAt(0);
             currentInitials[i] = charCode <= 65 ? 'Z' : String.fromCharCode(charCode - 1);
@@ -3347,27 +3443,28 @@ function showNameEntry(): void {
     
     modal.appendChild(initialsContainer);
     
-    // Submit button
+    // Submit button with retro arcade 3D styling
     const submitButton = document.createElement('button');
     submitButton.textContent = 'SUBMIT SCORE';
-    submitButton.style.padding = '15px 40px';
-    submitButton.style.fontSize = '18px';
-    submitButton.style.fontWeight = 'bold';
-    submitButton.style.backgroundColor = '#4CAF50';
-    submitButton.style.color = 'white';
+    submitButton.style.padding = '12px 30px';
+    submitButton.style.fontSize = '10px';
+    submitButton.style.fontFamily = "'Press Start 2P', cursive";
+    submitButton.style.background = 'linear-gradient(180deg, #00ff88 0%, #00cc6a 100%)';
+    submitButton.style.color = '#000';
     submitButton.style.border = 'none';
-    submitButton.style.borderRadius = '8px';
+    submitButton.style.borderRadius = '4px';
     submitButton.style.cursor = 'pointer';
-    submitButton.style.transition = 'all 0.3s ease';
+    submitButton.style.boxShadow = '0 4px 0 #009950, 0 0 15px rgba(0, 255, 136, 0.4)';
+    submitButton.style.transition = 'all 0.15s ease';
     
     submitButton.addEventListener('mouseenter', () => {
-        submitButton.style.backgroundColor = '#45a049';
-        submitButton.style.transform = 'scale(1.05)';
+        submitButton.style.transform = 'translateY(-2px)';
+        submitButton.style.boxShadow = '0 6px 0 #009950, 0 0 25px rgba(0, 255, 136, 0.6)';
     });
     
     submitButton.addEventListener('mouseleave', () => {
-        submitButton.style.backgroundColor = '#4CAF50';
-        submitButton.style.transform = 'scale(1)';
+        submitButton.style.transform = 'translateY(0)';
+        submitButton.style.boxShadow = '0 4px 0 #009950, 0 0 15px rgba(0, 255, 136, 0.4)';
     });
     
     submitButton.addEventListener('click', async () => {
@@ -3411,8 +3508,9 @@ function resetGameSkipWelcome(): void {
             const slot = document.getElementById(`mini-board-slot-${i}`);
             if (slot) {
                 slot.innerHTML = '';
-                slot.style.backgroundColor = 'rgba(30, 30, 30, 0.8)';
-                slot.style.border = '2px dashed rgba(100, 100, 100, 0.5)';
+                slot.style.backgroundColor = 'rgba(13, 13, 26, 0.9)';
+                slot.style.border = '2px dashed rgba(0, 212, 255, 0.2)';
+                slot.style.boxShadow = 'inset 0 0 20px rgba(0, 0, 0, 0.5)';
                 
                 // Recreate lock overlay
                 const lockOverlay = document.createElement('div');
@@ -3431,23 +3529,25 @@ function resetGameSkipWelcome(): void {
                 const lockIcon = document.createElement('div');
                 lockIcon.className = 'lock-icon';
                 lockIcon.textContent = '🔒';
-                lockIcon.style.fontSize = '24px';
-                lockIcon.style.marginBottom = '5px';
-                lockIcon.style.opacity = '0.6';
+                lockIcon.style.fontSize = '20px';
+                lockIcon.style.marginBottom = '8px';
+                lockIcon.style.opacity = '0.5';
                 
                 const boardLabel = document.createElement('div');
                 boardLabel.className = 'board-label';
-                boardLabel.textContent = `Board ${i + 2}`;
-                boardLabel.style.fontSize = '10px';
-                boardLabel.style.color = 'rgba(255, 255, 255, 0.5)';
-                boardLabel.style.fontWeight = 'bold';
+                boardLabel.textContent = `BOARD ${i + 2}`;
+                boardLabel.style.fontSize = '8px';
+                boardLabel.style.fontFamily = "'Press Start 2P', cursive";
+                boardLabel.style.color = 'rgba(255, 255, 255, 0.4)';
+                boardLabel.style.marginBottom = '4px';
                 
                 const unlockCost = document.createElement('div');
                 unlockCost.className = 'unlock-cost';
                 const cost = Math.round(BASE_COSTS.UNLOCK_NEXT_BOARD * Math.pow(COST_MULTIPLIER, i));
-                unlockCost.textContent = `${cost} pts`;
-                unlockCost.style.fontSize = '9px';
-                unlockCost.style.color = 'rgba(255, 255, 255, 0.4)';
+                unlockCost.textContent = `${cost} PTS`;
+                unlockCost.style.fontSize = '7px';
+                unlockCost.style.fontFamily = "'Press Start 2P', cursive";
+                unlockCost.style.color = 'rgba(255, 255, 255, 0.3)';
                 unlockCost.style.marginTop = '2px';
                 
                 lockOverlay.appendChild(lockIcon);
@@ -3506,6 +3606,7 @@ function resetGameSkipWelcome(): void {
 // =====================================================
 
 function createDialogueSystem(): void {
+    // Dark overlay behind dialogue
     const overlay = document.createElement('div');
     overlay.id = 'dialogue-overlay';
     overlay.style.position = 'fixed';
@@ -3513,43 +3614,53 @@ function createDialogueSystem(): void {
     overlay.style.left = '0';
     overlay.style.width = '100%';
     overlay.style.height = '100%';
-    overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+    overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
     overlay.style.display = 'none';
     overlay.style.zIndex = '2000';
     overlay.style.cursor = 'pointer';
     
+    // Dialogue box with retro arcade styling
     const dialogueBox = document.createElement('div');
     dialogueBox.id = 'dialogue-box';
     dialogueBox.style.position = 'absolute';
-    dialogueBox.style.backgroundColor = '#1a1a1a';
-    dialogueBox.style.border = '2px solid #4CAF50';
-    dialogueBox.style.borderRadius = '12px';
-    dialogueBox.style.padding = '20px';
-    dialogueBox.style.minWidth = '300px';
-    dialogueBox.style.maxWidth = '400px';
-    dialogueBox.style.boxShadow = '0 4px 20px rgba(0, 0, 0, 0.8)';
+    dialogueBox.style.backgroundColor = '#0d0d1a';
+    dialogueBox.style.border = '3px solid #00ff88';
+    dialogueBox.style.borderRadius = '8px';
+    dialogueBox.style.padding = '24px';
+    dialogueBox.style.minWidth = '320px';
+    dialogueBox.style.maxWidth = '420px';
+    dialogueBox.style.boxShadow = '0 0 30px rgba(0, 255, 136, 0.3), 0 0 60px rgba(0, 255, 136, 0.1), inset 0 0 30px rgba(0, 0, 0, 0.5)';
     dialogueBox.style.display = 'none';
     dialogueBox.style.zIndex = '2001';
     
+    // Title with retro font
     const title = document.createElement('h3');
     title.id = 'dialogue-title';
-    title.style.margin = '0 0 12px 0';
-    title.style.color = '#4CAF50';
-    title.style.fontSize = '18px';
+    title.style.margin = '0 0 16px 0';
+    title.style.color = '#00ff88';
+    title.style.fontSize = '14px';
+    title.style.fontFamily = "'Press Start 2P', cursive";
+    title.style.textShadow = '0 0 10px rgba(0, 255, 136, 0.5)';
+    title.style.lineHeight = '1.4';
     
+    // Description text with retro font
     const description = document.createElement('p');
     description.id = 'dialogue-description';
-    description.style.margin = '0 0 15px 0';
-    description.style.color = '#ffffff';
-    description.style.fontSize = '14px';
-    description.style.lineHeight = '1.5';
+    description.style.margin = '0 0 20px 0';
+    description.style.color = '#e8e8e8';
+    description.style.fontSize = '9px';
+    description.style.fontFamily = "'Press Start 2P', cursive";
+    description.style.lineHeight = '2';
     
+    // Hint text at bottom
     const hint = document.createElement('div');
-    hint.style.fontSize = '12px';
-    hint.style.color = '#888';
-    hint.style.fontStyle = 'italic';
+    hint.style.fontSize = '10px';
+    hint.style.fontFamily = "'Press Start 2P', cursive";
+    hint.style.color = '#666';
     hint.style.textAlign = 'center';
-    hint.textContent = 'Click anywhere to continue';
+    hint.style.paddingTop = '12px';
+    hint.style.borderTop = '1px solid rgba(255, 255, 255, 0.1)';
+    hint.textContent = 'CLICK TO CONTINUE';
     
     dialogueBox.appendChild(title);
     dialogueBox.appendChild(description);
@@ -3562,20 +3673,27 @@ function createDialogueSystem(): void {
 }
 
 function showDialogue(dialogueId: string, targetElement: HTMLElement | null): void {
+    // Track that this dialogue has been unlocked (for help menu)
     shownDialogues.add(dialogueId);
     
+    // Skip if tutorials are disabled
     if (!tutorialsEnabled) return;
+    
+    // Skip if this dialogue has already been shown this session
     if (displayedDialogues.has(dialogueId)) return;
     
+    // Skip if dialogue content doesn't exist
     const content = DIALOGUE_CONTENT[dialogueId];
     if (!content) return;
     
+    // Mark as displayed BEFORE queuing to prevent duplicate queue entries
+    displayedDialogues.add(dialogueId);
+    
+    // If another dialogue is showing, queue this one for later
     if (currentDialogue) {
         dialogueQueue.push(dialogueId);
         return;
     }
-    
-    displayedDialogues.add(dialogueId);
     
     const overlay = document.getElementById('dialogue-overlay');
     const box = document.getElementById('dialogue-box');
@@ -3605,7 +3723,7 @@ function showDialogue(dialogueId: string, targetElement: HTMLElement | null): vo
     } else {
         box.style.display = 'block';
         box.style.left = '50%';
-        box.style.top = '50%';
+        box.style.top = '30%';
         box.style.transform = 'translate(-50%, -50%)';
     }
 }
@@ -3622,13 +3740,11 @@ function closeCurrentDialogue(): void {
     
     currentDialogue = null;
     
-    if (dialogueQueue.length > 0) {
-        const nextId = dialogueQueue.shift()!;
-        setTimeout(() => showDialogue(nextId, null), 100);
-    } else {
-        isPaused = false;
-        document.body.classList.remove('noscroll');
-    }
+    // Clear the queue and unpause - don't chain dialogues back-to-back
+    // This prevents the game from feeling stuck when multiple upgrades unlock at once
+    dialogueQueue.length = 0;
+    isPaused = false;
+    document.body.classList.remove('noscroll');
 }
 
 function addTutorialControls(): void {
@@ -3636,55 +3752,106 @@ function addTutorialControls(): void {
     if (!controlsSection) return;
     
     const tutorialControls = document.createElement('div');
-    tutorialControls.style.marginTop = '10px';
+    tutorialControls.style.marginTop = '6px';
     tutorialControls.style.display = 'flex';
     tutorialControls.style.alignItems = 'center';
     tutorialControls.style.justifyContent = 'center';
-    tutorialControls.style.gap = '10px';
+    tutorialControls.style.gap = '8px';
+    
+    // Custom styled checkbox - wrapper is clickable
+    const checkboxWrapper = document.createElement('div');
+    checkboxWrapper.style.position = 'relative';
+    checkboxWrapper.style.width = '16px';
+    checkboxWrapper.style.height = '16px';
+    checkboxWrapper.style.cursor = 'pointer';
     
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.id = 'tutorial-toggle';
     checkbox.checked = tutorialsEnabled;
+    checkbox.style.position = 'absolute';
+    checkbox.style.opacity = '0';
     checkbox.style.cursor = 'pointer';
+    checkbox.style.width = '100%';
+    checkbox.style.height = '100%';
+    checkbox.style.margin = '0';
+    checkbox.style.zIndex = '1';
     
-    const label = document.createElement('label');
-    label.htmlFor = 'tutorial-toggle';
-    label.textContent = 'Show Tutorials';
-    label.style.fontSize = '11px';
-    label.style.cursor = 'pointer';
+    const checkboxVisual = document.createElement('div');
+    checkboxVisual.style.width = '14px';
+    checkboxVisual.style.height = '14px';
+    checkboxVisual.style.border = '2px solid #00ff88';
+    checkboxVisual.style.borderRadius = '3px';
+    checkboxVisual.style.backgroundColor = tutorialsEnabled ? '#00ff88' : 'transparent';
+    checkboxVisual.style.display = 'flex';
+    checkboxVisual.style.alignItems = 'center';
+    checkboxVisual.style.justifyContent = 'center';
+    checkboxVisual.style.transition = 'all 0.15s ease';
+    checkboxVisual.style.boxShadow = tutorialsEnabled ? '0 0 8px rgba(0, 255, 136, 0.5)' : 'none';
+    checkboxVisual.style.pointerEvents = 'none';
+    checkboxVisual.innerHTML = tutorialsEnabled ? '<span style="color: #000; font-size: 10px;">✓</span>' : '';
+    
+    // Update visual when checkbox changes
+    const updateCheckboxVisual = () => {
+        checkboxVisual.style.backgroundColor = tutorialsEnabled ? '#00ff88' : 'transparent';
+        checkboxVisual.style.boxShadow = tutorialsEnabled ? '0 0 8px rgba(0, 255, 136, 0.5)' : 'none';
+        checkboxVisual.innerHTML = tutorialsEnabled ? '<span style="color: #000; font-size: 10px;">✓</span>' : '';
+    };
     
     checkbox.addEventListener('change', () => {
         tutorialsEnabled = checkbox.checked;
+        updateCheckboxVisual();
     });
     
-    tutorialControls.appendChild(checkbox);
+    // Also toggle when clicking the visual wrapper
+    checkboxWrapper.addEventListener('click', () => {
+        checkbox.checked = !checkbox.checked;
+        tutorialsEnabled = checkbox.checked;
+        updateCheckboxVisual();
+    });
+    
+    checkboxWrapper.appendChild(checkboxVisual);
+    checkboxWrapper.appendChild(checkbox);
+    
+    const label = document.createElement('label');
+    label.htmlFor = 'tutorial-toggle';
+    label.textContent = 'TIPS';
+    label.style.fontSize = '8px';
+    label.style.fontFamily = "'Press Start 2P', cursive";
+    label.style.color = '#888';
+    label.style.cursor = 'pointer';
+    
+    tutorialControls.appendChild(checkboxWrapper);
     tutorialControls.appendChild(label);
     
-    // Help button (question mark) to show all unlocked dialogues
+    // Help button (question mark) with retro styling
     const helpButton = document.createElement('button');
     helpButton.id = 'help-button';
     helpButton.textContent = '?';
     helpButton.title = 'View all tutorials';
-    helpButton.style.width = '24px';
-    helpButton.style.height = '24px';
+    helpButton.style.width = '22px';
+    helpButton.style.height = '22px';
     helpButton.style.borderRadius = '50%';
-    helpButton.style.border = '2px solid #4CAF50';
+    helpButton.style.border = '2px solid #00ff88';
     helpButton.style.backgroundColor = 'transparent';
-    helpButton.style.color = '#4CAF50';
-    helpButton.style.fontSize = '14px';
-    helpButton.style.fontWeight = 'bold';
+    helpButton.style.color = '#00ff88';
+    helpButton.style.fontSize = '12px';
+    helpButton.style.fontFamily = "'Press Start 2P', cursive";
     helpButton.style.cursor = 'pointer';
-    helpButton.style.transition = 'all 0.2s ease';
+    helpButton.style.transition = 'all 0.15s ease';
+    helpButton.style.boxShadow = '0 0 8px rgba(0, 255, 136, 0.3)';
+    helpButton.style.marginLeft = '4px';
     
     helpButton.addEventListener('mouseenter', () => {
-        helpButton.style.backgroundColor = '#4CAF50';
-        helpButton.style.color = 'white';
+        helpButton.style.backgroundColor = '#00ff88';
+        helpButton.style.color = '#000';
+        helpButton.style.boxShadow = '0 0 15px rgba(0, 255, 136, 0.6)';
     });
     
     helpButton.addEventListener('mouseleave', () => {
         helpButton.style.backgroundColor = 'transparent';
-        helpButton.style.color = '#4CAF50';
+        helpButton.style.color = '#00ff88';
+        helpButton.style.boxShadow = '0 0 8px rgba(0, 255, 136, 0.3)';
     });
     
     helpButton.addEventListener('click', showHelpModal);
@@ -3693,7 +3860,7 @@ function addTutorialControls(): void {
     controlsSection.appendChild(tutorialControls);
 }
 
-// Show all unlocked dialogues in a modal
+// Show all unlocked dialogues in a modal with retro arcade styling
 function showHelpModal(): void {
     // Remove existing modal if any
     const existingModal = document.getElementById('help-modal-overlay');
@@ -3707,30 +3874,33 @@ function showHelpModal(): void {
     overlay.style.left = '0';
     overlay.style.width = '100%';
     overlay.style.height = '100%';
-    overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+    overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
     overlay.style.display = 'flex';
     overlay.style.justifyContent = 'center';
     overlay.style.alignItems = 'center';
     overlay.style.zIndex = '3000';
     
-    // Create modal box
+    // Create modal box with retro styling
     const modal = document.createElement('div');
-    modal.style.backgroundColor = '#1a1a1a';
-    modal.style.border = '2px solid #4CAF50';
-    modal.style.borderRadius = '12px';
-    modal.style.padding = '20px';
+    modal.style.backgroundColor = '#0d0d1a';
+    modal.style.border = '3px solid #00ff88';
+    modal.style.borderRadius = '8px';
+    modal.style.padding = '24px';
     modal.style.maxWidth = '500px';
     modal.style.maxHeight = '80vh';
     modal.style.overflowY = 'auto';
     modal.style.color = 'white';
-    modal.style.fontFamily = 'Arial, sans-serif';
+    modal.style.fontFamily = "'Press Start 2P', cursive";
+    modal.style.boxShadow = '0 0 30px rgba(0, 255, 136, 0.3), 0 0 60px rgba(0, 255, 136, 0.1), inset 0 0 30px rgba(0, 0, 0, 0.5)';
     
     // Title
     const title = document.createElement('h2');
-    title.textContent = 'Game Help';
+    title.textContent = 'GAME HELP';
     title.style.margin = '0 0 20px 0';
-    title.style.color = '#4CAF50';
+    title.style.color = '#00ff88';
     title.style.textAlign = 'center';
+    title.style.fontSize = '16px';
+    title.style.textShadow = '0 0 10px rgba(0, 255, 136, 0.5)';
     modal.appendChild(title);
     
     // Get all unlocked dialogues (from shownDialogues set)
@@ -3738,9 +3908,11 @@ function showHelpModal(): void {
     
     if (unlockedDialogues.length === 0) {
         const noContent = document.createElement('p');
-        noContent.textContent = 'No tutorials unlocked yet. Keep playing to discover new features!';
+        noContent.textContent = 'NO TIPS UNLOCKED YET. KEEP PLAYING!';
         noContent.style.textAlign = 'center';
-        noContent.style.opacity = '0.7';
+        noContent.style.color = '#666';
+        noContent.style.fontSize = '8px';
+        noContent.style.lineHeight = '2';
         modal.appendChild(noContent);
     } else {
         // Show each unlocked dialogue
@@ -3749,22 +3921,24 @@ function showHelpModal(): void {
             if (!content) return;
             
             const entry = document.createElement('div');
-            entry.style.marginBottom = '15px';
-            entry.style.padding = '12px';
-            entry.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
-            entry.style.borderRadius = '8px';
-            entry.style.borderLeft = '3px solid #4CAF50';
+            entry.style.marginBottom = '16px';
+            entry.style.padding = '14px';
+            entry.style.backgroundColor = 'rgba(0, 255, 136, 0.05)';
+            entry.style.borderRadius = '6px';
+            entry.style.borderLeft = '3px solid #00ff88';
             
             const entryTitle = document.createElement('div');
-            entryTitle.textContent = content.title;
-            entryTitle.style.fontWeight = 'bold';
-            entryTitle.style.marginBottom = '5px';
-            entryTitle.style.color = '#4CAF50';
+            entryTitle.textContent = content.title.toUpperCase();
+            entryTitle.style.marginBottom = '10px';
+            entryTitle.style.color = '#00ff88';
+            entryTitle.style.fontSize = '10px';
+            entryTitle.style.textShadow = '0 0 8px rgba(0, 255, 136, 0.4)';
             
             const entryDesc = document.createElement('div');
             entryDesc.textContent = content.description;
-            entryDesc.style.fontSize = '13px';
-            entryDesc.style.opacity = '0.9';
+            entryDesc.style.fontSize = '8px';
+            entryDesc.style.color = '#ccc';
+            entryDesc.style.lineHeight = '2';
             
             entry.appendChild(entryTitle);
             entry.appendChild(entryDesc);
@@ -3772,18 +3946,31 @@ function showHelpModal(): void {
         });
     }
     
-    // Close button
+    // Close button with arcade styling
     const closeButton = document.createElement('button');
-    closeButton.textContent = 'Close';
+    closeButton.textContent = 'CLOSE';
     closeButton.style.display = 'block';
     closeButton.style.margin = '20px auto 0';
-    closeButton.style.padding = '10px 30px';
-    closeButton.style.backgroundColor = '#4CAF50';
-    closeButton.style.color = 'white';
+    closeButton.style.padding = '12px 30px';
+    closeButton.style.background = 'linear-gradient(180deg, #00ff88 0%, #00cc6a 100%)';
+    closeButton.style.color = '#000';
     closeButton.style.border = 'none';
-    closeButton.style.borderRadius = '6px';
-    closeButton.style.fontSize = '14px';
+    closeButton.style.borderRadius = '4px';
+    closeButton.style.fontSize = '10px';
+    closeButton.style.fontFamily = "'Press Start 2P', cursive";
     closeButton.style.cursor = 'pointer';
+    closeButton.style.boxShadow = '0 4px 0 #009950, 0 0 15px rgba(0, 255, 136, 0.4)';
+    closeButton.style.transition = 'all 0.15s ease';
+    
+    closeButton.addEventListener('mouseenter', () => {
+        closeButton.style.transform = 'translateY(-2px)';
+        closeButton.style.boxShadow = '0 6px 0 #009950, 0 0 25px rgba(0, 255, 136, 0.6)';
+    });
+    
+    closeButton.addEventListener('mouseleave', () => {
+        closeButton.style.transform = 'translateY(0)';
+        closeButton.style.boxShadow = '0 4px 0 #009950, 0 0 15px rgba(0, 255, 136, 0.4)';
+    });
     
     closeButton.addEventListener('click', () => overlay.remove());
     modal.appendChild(closeButton);
@@ -3900,7 +4087,7 @@ if (tutorialsEnabled) {
     showDialogue('welcome', null);
 }
 
-/* DEBUG: Remove this after testing prestige
+/*DEBUG: Remove this after testing prestige
 const debugButton = document.createElement('button');
 debugButton.textContent = '🐛 DEBUG: Add 10k Score';
 debugButton.style.position = 'fixed';
