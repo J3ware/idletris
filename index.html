@@ -1,9 +1,37 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <!-- Global AdSense script (only once) -->
-  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4757245543517381"
-          crossorigin="anonymous"></script>
+<!-- GameMonetize SDK -->
+<script type="text/javascript">
+   window.SDK_OPTIONS = {
+      gameId: "i6u0x28mq2jel91x5awabh193n8mjk5z",
+      onEvent: function (event) {
+         switch (event.name) {
+            case "SDK_GAME_PAUSE":
+               // SDK is about to show an ad - pause and mute game
+               if (typeof window.idletrisPauseForAd === 'function') {
+                  window.idletrisPauseForAd();
+               }
+               break;
+            case "SDK_GAME_START":
+               // Ad finished - resume game
+               if (typeof window.idletrisResumeFromAd === 'function') {
+                  window.idletrisResumeFromAd();
+               }
+               break;
+            case "SDK_READY":
+               // SDK is loaded and ready
+               console.log("GameMonetize SDK ready");
+               window.gameMonetizeReady = true;
+               break;
+         }
+      }
+   };
+   (function (a, b, c) {
+      var d = a.getElementsByTagName(b)[0];
+      a.getElementById(c) || (a = a.createElement(b), a.id = c, a.src = "https://api.gamemonetize.com/sdk.js", d.parentNode.insertBefore(a, d))
+   })(document, "script", "gamemonetize-sdk");
+</script>
 
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -156,9 +184,9 @@
     #game-area {
         flex: 1;
         display: flex;
-        justify-content: flex-start;
+        justify-content: center;
         align-items: flex-start;
-        padding-left: 20px;
+        padding-left: 0;
     }
 
     /* The canvas itself */
@@ -410,6 +438,18 @@
     .arcade-btn-disabled::before {
         display: none;
     }
+    /* Ensure GameMonetize ads display above the header */
+#gamemonetize-container,
+.gamemonetize-container,
+[id^="gamemonetize"],
+[class^="gamemonetize"] {
+    z-index: 10000 !important;
+}
+
+/* Also catch any iframe they might inject */
+iframe[src*="gamemonetize"] {
+    z-index: 10000 !important;
+}
 </style>
 </head>
 <body>
@@ -450,29 +490,11 @@
         <path d="M925.69,264.16l30.28,28.34c6.25-2.05,10.87-2.21,16.56,1.51l33.18-29.9h1.59s8.63,7.26,8.63,7.26l-34.98,32.08c-1.83,3.23-.49,7.41-1.62,11.38-2.07,7.23-11.04,12.71-18.43,11.56-10.79-1.67-15.25-9.71-15.81-19.88l-31.35-31.83-.27-1.69,12.22-8.82Z"/>
     </g>
 </svg>
-  <!-- Your script creates the fixed global header at the top -->
-
-  <div id="layout">
-    <!-- Left 300×600 ad rail -->
-    <div id="left-ad">
-      <div style="position:absolute; font-size:14px; color:red; top:8px; left:8px;">
-        &nbsp;
-      </div>
-
-      <ins class="adsbygoogle"
-           style="display:inline-block;width:300px;height:600px"
-           data-ad-client="ca-pub-4757245543517381"
-           data-ad-slot="1802489685"></ins>
-      <script>
-        (adsbygoogle = window.adsbygoogle || []).push({});
-      </script>
-    </div>
-
-    <!-- Game area: your TS moves the canvas into its own container here -->
+<div id="layout">
     <div id="game-area">
       <canvas id="game-canvas"></canvas>
     </div>
-  </div>
+</div>
 
   <footer id="site-info">
     <nav id="footer-nav">

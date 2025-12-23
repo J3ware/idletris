@@ -15,7 +15,7 @@ const GRID_WIDTH = 10;      // Number of columns
 const GRID_HEIGHT = 20;     // Number of rows
 const CELL_SIZE = 30;       // Pixels per cell (active board)
 const CELL_SIZE_MINI = 10;  // Pixels per cell (minified boards - 1/3 size)
-const PADDING = 40;         // Padding around active board
+const PADDING = 30;         // Padding around active board
 const PADDING_MINI = 5;     // Padding around mini boards
 
 // Board dimensions
@@ -201,6 +201,106 @@ let hardDropUnlocked: boolean = false;
 // Game control state
 let isGameOver: boolean = false;
 let isPaused: boolean = false;
+
+// =====================================================
+// GAMEMONETIZE SDK INTEGRATION
+// =====================================================
+
+// Declare the SDK global (injected by GameMonetize script)
+declare const sdk: {
+    showBanner: () => void;
+} | undefined;
+
+// Track ad state
+let isShowingAd: boolean = false;
+let pendingAdReward: 'points' | null = null;
+const AD_REWARD_POINTS = 50;  // Points given for watching a rewarded ad
+
+// Expose pause/resume functions to window for SDK callbacks
+(window as any).idletrisPauseForAd = function() {
+    isShowingAd = true;
+    isPaused = true;
+    
+    // Hide the header so ad displays on top
+    const header = document.getElementById('global-header');
+    if (header) {
+        header.style.display = 'none';
+    }
+    
+    console.log("Game paused for ad");
+};
+
+(window as any).idletrisResumeFromAd = function() {
+    isShowingAd = false;
+    isPaused = false;
+    
+    // Show the header again
+    const header = document.getElementById('global-header');
+    if (header) {
+        header.style.display = 'flex';
+    }
+    
+    // Handle rewarded ad completion
+    if (pendingAdReward === 'points') {
+        globalPoints += AD_REWARD_POINTS;
+        updatePointsDisplay();
+        showAdRewardNotification(AD_REWARD_POINTS);
+        pendingAdReward = null;
+    }
+    
+    console.log("Game resumed after ad");
+};
+
+// Function to show an ad (call at strategic moments)
+function showGameAd(): void {
+    if (typeof sdk !== 'undefined' && sdk.showBanner) {
+        sdk.showBanner();
+    }
+}
+
+// Function to show a rewarded ad (player chooses to watch for bonus)
+function showRewardedAd(): void {
+    if (typeof sdk !== 'undefined' && sdk.showBanner) {
+        pendingAdReward = 'points';
+        sdk.showBanner();
+    }
+}
+
+// Visual notification when reward is granted
+function showAdRewardNotification(points: number): void {
+    const notification = document.createElement('div');
+    notification.textContent = `+${points} BONUS POINTS!`;
+    notification.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: linear-gradient(180deg, #00ff88 0%, #00cc6a 100%);
+        color: #000;
+        padding: 20px 40px;
+        border-radius: 8px;
+        font-family: 'Press Start 2P', cursive;
+        font-size: 16px;
+        z-index: 10000;
+        box-shadow: 0 0 30px rgba(0, 255, 136, 0.6);
+        animation: adRewardPop 2s ease-out forwards;
+    `;
+    
+    // Add animation keyframes
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes adRewardPop {
+            0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; }
+            20% { transform: translate(-50%, -50%) scale(1.1); opacity: 1; }
+            80% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+            100% { transform: translate(-50%, -60%) scale(1); opacity: 0; }
+        }
+    `;
+    document.head.appendChild(style);
+    document.body.appendChild(notification);
+    
+    setTimeout(() => notification.remove(), 2000);
+}
 
 // =====================================================
 // DIALOGUE SYSTEM STATE
@@ -1537,6 +1637,50 @@ function createBoardUI(boardIndex: number): void {
     upgradesSection.style.gap = '10px';
     
     uiPanel.appendChild(nextPieceSection);
+    // Add Watch Ad button section
+const watchAdSection = document.createElement('div');
+watchAdSection.id = `watch-ad-section-${boardIndex}`;
+watchAdSection.style.marginBottom = '20px';
+
+const watchAdButton = document.createElement('button');
+watchAdButton.id = `watch-ad-button-${boardIndex}`;
+watchAdButton.innerHTML = '🎬 WATCH AD<br><span style="font-size: 7px; color: #00ff88;">+50 POINTS</span>';
+watchAdButton.style.cssText = `
+    width: 100%;
+    padding: 12px 15px;
+    background: linear-gradient(180deg, #ff9f43 0%, #ff6b00 100%);
+    color: #000;
+    border: none;
+    border-radius: 8px;
+    font-family: 'Press Start 2P', cursive;
+    font-size: 9px;
+    cursor: pointer;
+    box-shadow: 0 4px 0 #cc5500, 0 0 15px rgba(255, 159, 67, 0.3);
+    transition: all 0.15s ease;
+    text-align: center;
+    line-height: 1.8;
+`;
+
+watchAdButton.addEventListener('mouseenter', () => {
+    watchAdButton.style.transform = 'translateY(-2px)';
+    watchAdButton.style.boxShadow = '0 6px 0 #cc5500, 0 0 25px rgba(255, 159, 67, 0.5)';
+});
+
+watchAdButton.addEventListener('mouseleave', () => {
+    watchAdButton.style.transform = 'translateY(0)';
+    watchAdButton.style.boxShadow = '0 4px 0 #cc5500, 0 0 15px rgba(255, 159, 67, 0.3)';
+});
+
+watchAdButton.addEventListener('click', () => {
+    if (typeof sdk !== 'undefined' && sdk.showBanner) {
+        showRewardedAd();
+    } else {
+        console.log("Ad SDK not ready yet");
+    }
+});
+
+watchAdSection.appendChild(watchAdButton);
+uiPanel.appendChild(watchAdSection);
     uiPanel.appendChild(upgradesSection);
     
     boardContainer.appendChild(uiPanel);
@@ -1613,6 +1757,35 @@ function createBoardUpgradeButtons(boardIndex: number): void {
     takeControlCounter.style.fontSize = '12px';
     takeControlCounter.innerHTML = `<span>🎮 Pieces left: <strong id="take-control-count-${boardIndex}">0</strong></span>`;
     upgradesSection.appendChild(takeControlCounter);
+}
+
+// =====================================================
+// REWARDED AD BUTTON
+// =====================================================
+
+function createRewardedAdButton(): void {
+    const button = document.createElement('button');
+    button.id = 'watch-ad-button';
+    button.innerHTML = '🎬 WATCH AD<br><span style="font-size: 8px; color: #00ff88;">+50 POINTS</span>';
+    button.style.cssText = `
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        padding: 15px 20px;
+        background: linear-gradient(180deg, #ff9f43 0%, #ff6b00 100%);
+        color: #000;
+        border: none;
+        border-radius: 8px;
+        font-family: 'Press Start 2P', cursive;
+        font-size: 10px;
+        cursor: pointer;
+        z-index: 9000;
+        box-shadow: 0 4px 0 #cc5500, 0 0 20px rgba(255, 159, 67, 0.4);
+        transition: all 0.15s ease;
+        text-align: center;
+        line-height: 1.6;
+    `;
+    
 }
 
 // =====================================================
@@ -4081,6 +4254,8 @@ createGameOverScreen();
 updateStarsDisplay();
 updatePrestigeButton();
 updateSlotLocks();
+// Create rewarded ad button
+createRewardedAdButton();
 
 // Show welcome dialogue on first game start
 if (tutorialsEnabled) {
