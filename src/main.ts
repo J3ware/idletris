@@ -212,6 +212,7 @@ declare const sdk: {
 } | undefined;
 
 // Track ad state
+// @ts-ignore - used in window.idletrisPauseForAd and window.idletrisResumeFromAd
 let isShowingAd: boolean = false;
 let pendingAdReward: 'points' | null = null;
 const AD_REWARD_POINTS = 50;  // Points given for watching a rewarded ad
@@ -252,8 +253,9 @@ const AD_REWARD_POINTS = 50;  // Points given for watching a rewarded ad
 };
 
 // Function to show an ad (call at strategic moments)
+// @ts-ignore - will be used for automatic ads at game milestones later
 function showGameAd(): void {
-    if (typeof sdk !== 'undefined' && sdk.showBanner) {
+    if (typeof sdk !== 'undefined' && typeof sdk.showBanner === 'function') {
         sdk.showBanner();
     }
 }
@@ -1672,7 +1674,7 @@ watchAdButton.addEventListener('mouseleave', () => {
 });
 
 watchAdButton.addEventListener('click', () => {
-    if (typeof sdk !== 'undefined' && sdk.showBanner) {
+    if (typeof sdk !== 'undefined' && typeof sdk.showBanner === 'function') {
         showRewardedAd();
     } else {
         console.log("Ad SDK not ready yet");
